@@ -97,6 +97,7 @@ let claimValue = null;
 let unoAlertTimeout = null;
 let currentUnoCallRequired = null;
 let unoCallClearPending = false;
+let sevenSwapMode = null; // 'normal' | 'liar' | null
 
 function isLiarCard(card) {
   return card && card.liar === true;
@@ -378,6 +379,7 @@ function renderGame(state) {
   renderHand(state);
   renderLog(state);
   renderUnoCallOverlay(state);
+  renderSevenSwapOverlay(state);
 
   // Draw pile cursor
   const myTurn = isMyTurn(state) && !state.challengeOpen;
@@ -606,6 +608,9 @@ async function selectCard(index) {
   if (card.value === 'wild' || isLiarCard(card)) {
     renderClaimPicker();
     document.getElementById('claim-dialog').classList.remove('hidden');
+  } else if (card.value === '7') {
+    document.getElementById('claim-dialog').classList.add('hidden');
+    showSevenSwapDialog('normal');
   } else {
     document.getElementById('claim-dialog').classList.add('hidden');
     await playNormalCard(card, index);
@@ -683,6 +688,134 @@ function passHands(hands, players, direction) {
     newHands[toId] = hands[fromId];
   }
   return newHands;
+}
+
+// ============================================================
+// SEVEN SWAP
+// ============================================================
+
+function showSevenSwapDialog(mode) {
+  sevenSwapMode = mode;
+  const state = roomState;
+  const others = state.players.filter(p => p.id !== localUid);
+  document.getElementById('seven-swap-player-list').innerHTML = others.map(p =>
+    `<button class="btn btn-secondary" style="width:100%;padding:.6rem"
+      onclick="pickSevenSwapTarget('${p.id}')">
+      ${esc(p.name)} (${p.cardCount} cartas)
+    </button>`
+  ).join('');
+  document.getElementById('seven-swap-cancel-row').classList.toggle('hidden', mode === 'liar');
+  document.getElementById('seven-swap-dialog').classList.remove('hidden');
+}
+
+function cancelSevenSwap() {
+  document.getElementById('seven-swap-dialog').classList.add('hidden');
+  sevenSwapMode = null;
+  selectedCardIdx = null;
+  selectedActualCard = null;
+}
+
+async function pickSevenSwapTarget(targetId) {
+  const mode = sevenSwapMode;
+  sevenSwapMode = null;
+  document.getElementById('seven-swap-dialog').classList.add('hidden');
+  if (mode === 'normal') {
+    await playNormalCardWithSwap(selectedActualCard, selectedCardIdx, targetId);
+    selectedCardIdx = null;
+    selectedActualCard = null;
+  } else {
+    await executeSevenSwap(targetId);
+  }
+}
+
+async function playNormalCardWithSwap(actualCard, cardIndex, targetId) {
+  const state = roomState;
+  const myHand = [...(state.hands?.[localUid] || [])];
+  const handAfterPlay = myHand.filter((_, i) => i !== cardIndex);
+  const won = handAfterPlay.length === 0;
+
+  let log = addLog(state.log,
+    `${localName} jugó ${COLOR_NAME[actualCard.color]} ${VALUE_LABEL[actualCard.value]} boca arriba.`
+  );
+
+  const newHands = { ...state.hands, [localUid]: handAfterPlay };
+  let players = state.players.map(p =>
+    p.id === localUid ? { ...p, cardCount: handAfterPlay.length } : p
+  );
+
+  if (!won) {
+    const targetName = state.players.find(p => p.id === targetId)?.name || '?';
+    newHands[localUid] = newHands[targetId] || [];
+    newHands[targetId] = handAfterPlay;
+    players = players.map(p => ({ ...p, cardCount: (newHands[p.id] || []).length }));
+    log = addLog(log, `${localName} intercambió manos con ${targetName}.`);
+  }
+
+  const myFinalHand = newHands[localUid];
+  const update = {
+    players,
+    hands: newHands,
+    topColor: actualCard.color,
+    topValue: actualCard.value,
+    currentPlayerIndex: nextPlayerIndex(state),
+    challengeOpen: false,
+    lastActualCard: null,
+    lastClaimedCard: null,
+    sevenSwapPending: firebase.firestore.FieldValue.delete(),
+    log,
+    lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  update.unoCallRequired = (!won && myFinalHand.length === 1)
+    ? { playerId: localUid, playerName: localName }
+    : firebase.firestore.FieldValue.delete();
+
+  if (won) {
+    update.status = 'ended';
+    update.winner = localUid;
+    update.winnerName = localName;
+  }
+
+  await db.collection('rooms').doc(currentRoomId).update(update);
+}
+
+async function executeSevenSwap(targetId) {
+  const state = roomState;
+  const pending = state.sevenSwapPending;
+  if (!pending || pending.chooserId !== localUid) return;
+
+  let { hands, players } = state;
+  const targetName = players.find(p => p.id === targetId)?.name || '?';
+  const chooserHand = hands[localUid] || [];
+  const targetHand  = hands[targetId]  || [];
+
+  hands   = { ...hands, [localUid]: targetHand, [targetId]: chooserHand };
+  players = players.map(p => ({ ...p, cardCount: (hands[p.id] || []).length }));
+
+  const log = addLog(state.log, `${localName} intercambió manos con ${targetName}.`);
+
+  await db.collection('rooms').doc(currentRoomId).update({
+    hands,
+    players,
+    currentPlayerIndex: pending.nextPlayerIndex,
+    sevenSwapPending: firebase.firestore.FieldValue.delete(),
+    log,
+    lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+function renderSevenSwapOverlay(state) {
+  const pending = state.sevenSwapPending;
+  if (!pending || pending.chooserId !== localUid) {
+    if (sevenSwapMode === 'liar') {
+      document.getElementById('seven-swap-dialog').classList.add('hidden');
+      sevenSwapMode = null;
+    }
+    return;
+  }
+  if (sevenSwapMode !== 'liar') {
+    showSevenSwapDialog('liar');
+  }
 }
 
 async function playNormalCard(actualCard, cardIndex, chosenColor = null) {
@@ -901,6 +1034,23 @@ function applyEffectsAndAdvance(state) {
   let newIdx    = nextIdx;
 
   switch (claimed.value) {
+
+    case '7': {
+      const chooser = players[currentPlayerIndex];
+      return {
+        changes: {
+          topColor, topValue, direction,
+          currentPlayerIndex,
+          players, hands, drawPile,
+          sevenSwapPending: {
+            chooserId: chooser.id,
+            chooserName: chooser.name,
+            nextPlayerIndex: nextIdx
+          }
+        },
+        logExtra: `${chooser.name} elige con quién intercambiar manos.`
+      };
+    }
 
     case '0': {
       const passedHands = passHands(hands, players, direction);
