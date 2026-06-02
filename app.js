@@ -12,12 +12,12 @@
 // ============================================================
 
 const FIREBASE_CONFIG = {
-  apiKey:            "PASTE_YOUR_API_KEY",
-  authDomain:        "PASTE_YOUR_PROJECT_ID.firebaseapp.com",
-  projectId:         "PASTE_YOUR_PROJECT_ID",
-  storageBucket:     "PASTE_YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "PASTE_YOUR_MESSAGING_SENDER_ID",
-  appId:             "PASTE_YOUR_APP_ID"
+  apiKey:            "AIzaSyDD88huoZNmnG8HKPb0aYYFUl5L_-tjVzQ",
+  authDomain:        "unomentiroso-b5742.firebaseapp.com",
+  projectId:         "unomentiroso-b5742",
+  storageBucket:     "unomentiroso-b5742.firebasestorage.app",
+  messagingSenderId: "771588309649",
+  appId:             "1:771588309649:web:f2e1f4450a2975f1d7f530"
 };
 
 // ============================================================
