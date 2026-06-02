@@ -341,6 +341,42 @@ input[type=text]:focus { border-color: var(--blue); }
   border-radius: 10px;
 }
 
+/* Wild card four-color quad design */
+.wild-quad {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -56%);
+  width: 42px;
+  height: 42px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 2px solid rgba(255,255,255,.55);
+  box-shadow: 0 2px 8px rgba(0,0,0,.7);
+  z-index: 1;
+}
+.wq { display: block; }
+.wq.r { background: #d72828; }
+.wq.b { background: #1a4fd4; }
+.wq.y { background: #e6c000; }
+.wq.g { background: #19a832; }
+.wild-extra-label {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: .85rem;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0,0,0,.8);
+  z-index: 1;
+  letter-spacing: .5px;
+}
+
 .card.playable { cursor: pointer; }
 .card.playable:hover { transform: translateY(-6px) scale(1.05); z-index: 2; }
 .card.selected-card  { transform: translateY(-10px); outline: 3px solid #fff; }

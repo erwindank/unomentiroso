@@ -37,6 +37,14 @@ const VALUE_LABEL = {
 };
 const COLOR_NAME = { red:'Rojo', yellow:'Amarillo', green:'Verde', blue:'Azul', black:'Comodín' };
 
+function wildCenterHTML(value) {
+  const label = value === 'wild4' ? '+4' : '';
+  return `<span class="wild-quad">\
+<span class="wq r"></span><span class="wq b"></span>\
+<span class="wq y"></span><span class="wq g"></span>\
+</span>${label ? `<span class="wild-extra-label">${label}</span>` : ''}`;
+}
+
 // ============================================================
 // DECK
 // ============================================================
@@ -520,9 +528,10 @@ function renderTopCard(state) {
   const el = document.getElementById('top-card');
   el.className = 'card ' + (state.topColor || 'red');
   const lbl = VALUE_LABEL[state.topValue] || '?';
-  el.innerHTML = `<span class="card-label tl">${lbl}</span>
-    <span class="card-label center">${lbl}</span>
-    <span class="card-label br">${lbl}</span>`;
+  const isWild = WILDS.includes(state.topValue);
+  el.innerHTML = isWild
+    ? `<span class="card-label tl">${lbl}</span>${wildCenterHTML(state.topValue)}<span class="card-label br">${lbl}</span>`
+    : `<span class="card-label tl">${lbl}</span><span class="card-label center">${lbl}</span><span class="card-label br">${lbl}</span>`;
 }
 
 function renderOpponents(state) {
@@ -599,13 +608,16 @@ function renderHand(state) {
       isPlayable = myTurn;
       onclick = myTurn ? `selectCard(${i})` : '';
     }
+    const lbl = VALUE_LABEL[card.value];
+    const isWild = WILDS.includes(card.value);
+    const centerHTML = isWild ? wildCenterHTML(card.value) : `<span class="card-label center">${lbl}</span>`;
     return `<div class="card ${card.color} ${isLiarCard(card) ? 'liar' : ''}${isPlayable ? ' playable' : ''}${extraClass}"
       data-index="${i}"
       onclick="${onclick}"
     >
-      <span class="card-label tl">${VALUE_LABEL[card.value]}</span>
-      <span class="card-label center">${VALUE_LABEL[card.value]}</span>
-      <span class="card-label br">${VALUE_LABEL[card.value]}</span>
+      <span class="card-label tl">${lbl}</span>
+      ${centerHTML}
+      <span class="card-label br">${lbl}</span>
     </div>`;
   }).join('');
 
@@ -656,10 +668,13 @@ async function selectCard(index) {
   claimValue = card.value;
 
   const preview = document.getElementById('actual-card-preview');
+  const _lbl = VALUE_LABEL[card.value];
+  const _isWild = WILDS.includes(card.value);
+  const _centerHTML = _isWild ? wildCenterHTML(card.value) : `<span class="card-label center" style="font-size:1.2rem">${_lbl}</span>`;
   preview.innerHTML = `<div class="card ${card.color} ${isLiarCard(card) ? 'liar' : ''}" style="width:50px;height:75px;margin:0 auto">
-    <span class="card-label tl">${VALUE_LABEL[card.value]}</span>
-    <span class="card-label center" style="font-size:1.2rem">${VALUE_LABEL[card.value]}</span>
-    <span class="card-label br">${VALUE_LABEL[card.value]}</span>
+    <span class="card-label tl">${_lbl}</span>
+    ${_centerHTML}
+    <span class="card-label br">${_lbl}</span>
   </div>`;
 
   if (card.value === 'wild' || isLiarCard(card)) {
