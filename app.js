@@ -713,6 +713,14 @@ function renderGame(state) {
   const myTurn = isMyTurn(state) && !state.challengeOpen;
   const canDraw = myTurn && drawnCardState === null && !state.wildChallenge;
   document.getElementById('draw-pile-area').style.opacity = canDraw ? '1' : '0.5';
+
+  const myHand     = state.hands?.[localUid] || [];
+  const hasGenuine = myHand.some(c => c.value === 'wild' || (!isLiarCard(c) && isActualPlayable(c, state)));
+  const hasLiar    = myHand.some(c => isLiarCard(c));
+  const noPlayable = canDraw && !hasGenuine && !hasLiar;
+  const onlyLiar   = canDraw && !hasGenuine && hasLiar;
+  document.getElementById('draw-pile-area').classList.toggle('must-draw', noPlayable);
+  document.getElementById('draw-pile-area').classList.toggle('could-lie', onlyLiar);
 }
 
 function renderTurnActions(state) {
@@ -1896,6 +1904,13 @@ async function handleDraw() {
   const state = roomState;
   if (!isMyTurn(state) || state.challengeOpen || state.wildChallenge) return;
   if (drawnCardState !== null) return;
+
+  const myHand     = state.hands?.[localUid] || [];
+  const hasGenuine = myHand.some(c => c.value === 'wild' || (!isLiarCard(c) && isActualPlayable(c, state)));
+  const hasLiar    = myHand.some(c => isLiarCard(c));
+  if (!hasGenuine && hasLiar) {
+    if (!confirm('Tienes cartas de mentira que puedes jugar. ¿Quieres robar de todas formas?')) return;
+  }
 
   const { drawn, newDrawPile } = takeCards(state.drawPile, 1);
   const newHand  = [...(state.hands?.[localUid] || []), ...drawn];

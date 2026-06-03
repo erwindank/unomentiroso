@@ -337,6 +337,42 @@ input[type=text]:focus { border-color: var(--blue); }
   text-shadow: 0 0 6px rgba(220,0,0,.8), 0 1px 3px rgba(0,0,0,.9);
 }
 
+/* Must-draw state: blue glow on pile, pulsating yellow ROBAR label */
+@keyframes draw-pile-glow-blue {
+  0%, 100% { box-shadow: 0 0 10px 2px rgba(30,140,255,.6), 2px 4px 14px rgba(0,0,0,.6); transform: scale(1); }
+  50%       { box-shadow: 0 0 24px 8px rgba(30,140,255,.95), 2px 4px 14px rgba(0,0,0,.6); transform: scale(1.08); }
+}
+@keyframes robar-pulse-yellow {
+  0%, 100% { color: #FFD700; text-shadow: 0 0 4px rgba(255,215,0,.5); }
+  50%       { color: #FFE94D; text-shadow: 0 0 12px rgba(255,215,0,1), 0 0 20px rgba(255,200,0,.7); }
+}
+#draw-pile-area.must-draw .card-back {
+  animation: draw-pile-glow-blue 1s ease-in-out infinite;
+  border-color: rgba(30,140,255,.7);
+}
+#draw-pile-area.must-draw .pile-label {
+  animation: robar-pulse-yellow 1s ease-in-out infinite;
+  font-weight: 700;
+}
+
+/* Could-lie state: red glow on pile, pulsating red ROBAR label */
+@keyframes draw-pile-glow-red {
+  0%, 100% { box-shadow: 0 0 10px 2px rgba(220,40,40,.6), 2px 4px 14px rgba(0,0,0,.6); transform: scale(1); }
+  50%       { box-shadow: 0 0 24px 8px rgba(220,40,40,.95), 2px 4px 14px rgba(0,0,0,.6); transform: scale(1.08); }
+}
+@keyframes robar-pulse-red {
+  0%, 100% { color: #ff4444; text-shadow: 0 0 4px rgba(220,40,40,.5); }
+  50%       { color: #ff7070; text-shadow: 0 0 12px rgba(220,40,40,1), 0 0 20px rgba(200,20,20,.7); }
+}
+#draw-pile-area.could-lie .card-back {
+  animation: draw-pile-glow-red 1s ease-in-out infinite;
+  border-color: rgba(220,40,40,.7);
+}
+#draw-pile-area.could-lie .pile-label {
+  animation: robar-pulse-red 1s ease-in-out infinite;
+  font-weight: 700;
+}
+
 /* ---- CARDS ---- */
 .card {
   width: 60px;
