@@ -811,8 +811,10 @@ function renderLog(state) {
   const el = document.getElementById('game-log');
   el.innerHTML = [...(state.log || [])].reverse()
     .map(msg => {
-      const cls = msg.includes('¡Descubierto!') ? ' log-lie'
-                : msg.includes('dijo la verdad') ? ' log-truth'
+      const cls = msg.includes('descubrió') ? ' log-lie'
+                : /dijo la verdad/i.test(msg) ? ' log-truth'
+                : msg.includes('le gritó UNO') ? ' log-uno'
+                : msg.includes('¡UNO! 🎴') ? ' log-uno-call'
                 : '';
       return `<div class="log-entry${cls}">${colorizeLog(msg)}</div>`;
     })
@@ -1531,7 +1533,7 @@ async function handleChallenge() {
   } else {
     // Honesto: el desafiante roba 1 carta y se aplica el efecto
     log = addLog(log,
-      `✓ ${localName} acusó a ${liar?.name}, que dijo la verdad (${cardLogName(actual)}). ${localName} roba 1.`
+      `✓ ${localName} acusó a ${liar?.name}, pero ${liar?.name} dijo la Verdad (${cardLogName(actual)}). ${localName} roba 1.`
     );
 
     if (claimed.value === '0') {
