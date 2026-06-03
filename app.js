@@ -1011,6 +1011,7 @@ function renderLog(state) {
                 : /dijo la verdad/i.test(msg) ? ' log-truth'
                 : msg.includes('le gritó UNO') ? ' log-uno'
                 : msg.includes('¡UNO! 🎴') ? ' log-uno-call'
+                : /intercambi/.test(msg) ? ' log-swap'
                 : '';
       return `<div class="log-entry${cls}">${colorizeLog(msg)}</div>`;
     })
@@ -1374,6 +1375,7 @@ function renderWildChallenge(state) {
                 : /dijo la verdad/i.test(msg) ? ' log-truth'
                 : msg.includes('le gritó UNO') ? ' log-uno'
                 : msg.includes('¡UNO! 🎴') ? ' log-uno-call'
+                : /intercambi/.test(msg) ? ' log-swap'
                 : '';
       return `<div class="log-entry${cls}">${colorizeLog(msg)}</div>`;
     }).join('');
