@@ -786,7 +786,14 @@ async function selectCard(index) {
     ${cornerLabelHTML(card.value, 'br')}
   </div>`;
 
-  if (card.value === 'wild' || isLiarCard(card)) {
+  if (card.value === 'wild') {
+    document.getElementById('claim-dialog-title').textContent = 'Elige el color del Comodín';
+    document.getElementById('actual-card-preview').classList.add('hidden');
+    renderClaimPicker();
+    document.getElementById('claim-dialog').classList.remove('hidden');
+  } else if (isLiarCard(card)) {
+    document.getElementById('claim-dialog-title').textContent = 'Declara esta carta como…';
+    document.getElementById('actual-card-preview').classList.remove('hidden');
     renderClaimPicker();
     document.getElementById('claim-dialog').classList.remove('hidden');
   } else if (card.value === '7') {
@@ -806,12 +813,15 @@ function renderClaimPicker() {
       onclick="setClaimColor('${c}')" title="${COLOR_NAME[c]}"></button>`
   ).join('');
 
-  const values = selectedActualCard?.value === 'wild' ? ['wild'] : ALL_VALUES;
-  document.getElementById('claim-value-picker').innerHTML = values.map(v => {
-    const disabled = selectedActualCard?.value === 'wild' && v !== 'wild';
-    return `<button class="value-btn ${claimValue === v ? 'selected' : ''}${disabled ? ' disabled' : ''}"
-      onclick="setClaimValue('${v}')"${disabled ? ' disabled' : ''}>${VALUE_LABEL[v]}</button>`;
-  }).join('');
+  const valuePicker = document.getElementById('claim-value-picker');
+  if (selectedActualCard?.value === 'wild') {
+    valuePicker.innerHTML = '';
+  } else {
+    valuePicker.innerHTML = ALL_VALUES.map(v =>
+      `<button class="value-btn ${claimValue === v ? 'selected' : ''}"
+        onclick="setClaimValue('${v}')">${VALUE_LABEL[v]}</button>`
+    ).join('');
+  }
 }
 
 function setClaimColor(color) { claimColor = color; renderClaimPicker(); }
