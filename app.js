@@ -277,6 +277,8 @@ function nextPlayerIndex(state) {
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-' + id).classList.add('active');
+  const gameCodeText = document.getElementById('game-room-code-text');
+  if (gameCodeText) gameCodeText.textContent = currentRoomId || '';
 }
 
 function showLandingError(msg) {
@@ -450,6 +452,18 @@ function copyCode() {
   const btn = document.querySelector('.btn-copy');
   btn.textContent = '¡Copiado!';
   setTimeout(() => { btn.textContent = 'Copiar'; }, 1500);
+}
+
+function copyGameCode(el) {
+  navigator.clipboard.writeText(currentRoomId).catch(() => {});
+  const textEl = el.querySelector('#game-room-code-text');
+  const original = textEl.textContent;
+  textEl.textContent = '¡Copiado!';
+  el.querySelector('svg').style.display = 'none';
+  setTimeout(() => {
+    textEl.textContent = original;
+    el.querySelector('svg').style.display = '';
+  }, 1500);
 }
 
 // ============================================================
