@@ -44,7 +44,37 @@ body {
   flex-direction: column;
   gap: 1.2rem;
 }
-.landing-card h1 { font-size: 2rem; text-align: center; letter-spacing: -1px; }
+.game-title {
+  text-align: center;
+  line-height: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+.title-uno {
+  font-family: 'Oswald', sans-serif;
+  font-weight: 700;
+  font-size: 4rem;
+  text-transform: uppercase;
+  letter-spacing: 4px;
+  color: #fff;
+  background: var(--blue);
+  padding: 0.05em 0.35em;
+  border: 4px solid #fff;
+  outline: 3px solid var(--blue);
+  line-height: 1.1;
+}
+.title-mentiroso {
+  font-family: 'Oswald', sans-serif;
+  font-weight: 700;
+  font-size: 2.1rem;
+  text-transform: uppercase;
+  letter-spacing: 6px;
+  color: #fff;
+  text-shadow: 2px 2px 0 var(--blue), -1px -1px 0 #000;
+  margin-top: 0.15em;
+}
 .tagline { text-align: center; color: var(--muted); font-size: .9rem; }
 
 input[type=text] {
