@@ -1307,11 +1307,11 @@ function buildWcCardTable(wc, state) {
       const badge = flippedEntry.result === 'correct' ? '✓' : '✗';
       cardHTML = `<div class="wc-slot-flipped ${cls}">${buildCardHTML(flippedEntry.card)}<div class="wc-flip-badge">${badge}</div></div>`;
     } else if (wc.submittedCards?.[pid]) {
-      cardHTML = `<div class="wc-card-back"><span class="back-uno">UNO</span></div>`;
+      cardHTML = `<div class="wc-card-back"><span class="back-uno">UNO</span><span class="back-liars">LIARS</span></div>`;
     } else if (wc.playersNeeded?.includes(pid)) {
       cardHTML = `<div class="wc-slot-empty">?</div>`;
     } else {
-      cardHTML = `<div class="wc-card-back"><span class="back-uno">UNO</span></div>`;
+      cardHTML = `<div class="wc-card-back"><span class="back-uno">UNO</span><span class="back-liars">LIARS</span></div>`;
     }
     return `<div class="wc-card-slot">${cardHTML}<span class="wc-slot-name">${esc(p.name)}</span></div>`;
   }).join('');

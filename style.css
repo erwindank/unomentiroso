@@ -1093,8 +1093,10 @@ input[type=text]:focus { border-color: var(--blue); }
   border: 2px solid rgba(255,255,255,.18);
   box-shadow: 1px 3px 10px rgba(0,0,0,.5);
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 1px;
   position: relative;
   overflow: hidden;
 }
@@ -1119,6 +1121,15 @@ input[type=text]:focus { border-color: var(--blue); }
   color: #E8B800;
   letter-spacing: 1px;
   text-shadow: 0 0 6px rgba(255,200,0,.6);
+}
+.wc-card-back .back-liars {
+  position: relative;
+  z-index: 1;
+  color: #e02020;
+  font-weight: 900;
+  font-size: .4rem;
+  letter-spacing: 1px;
+  text-shadow: 0 0 6px rgba(220,0,0,.8), 0 1px 3px rgba(0,0,0,.9);
 }
 /* Empty slot (waiting) */
 .wc-slot-empty {
