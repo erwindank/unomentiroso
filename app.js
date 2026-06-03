@@ -165,7 +165,7 @@ function colorizeLog(msg) {
   s = s.replace(new RegExp(`(Rojo|Amarillo|Verde|Azul)(?:\\s+(${LOG_VALUE_PAT}))?`, 'g'), (_, name, val) => {
     const key = Object.entries(COLOR_NAME).find(([, v]) => v === name)?.[0];
     const hex = LOG_COLOR_HEX[key] || '#fff';
-    return `<span style="color:${hex};font-weight:700">${name}${val ? ' '+val : ''}</span>`;
+    return `<span class="log-color-${key}" style="color:${hex};font-weight:700">${name}${val ? ' '+val : ''}</span>`;
   });
   return s;
 }
@@ -635,7 +635,7 @@ function renderHand(state) {
 
 function renderLog(state) {
   const el = document.getElementById('game-log');
-  el.innerHTML = [...(state.log || [])].reverse().slice(0, 2)
+  el.innerHTML = [...(state.log || [])].reverse()
     .map(msg => {
       const cls = msg.includes('¡Descubierto!') ? ' log-lie'
                 : msg.includes('dijo la verdad') ? ' log-truth'
@@ -643,6 +643,7 @@ function renderLog(state) {
       return `<div class="log-entry${cls}">${colorizeLog(msg)}</div>`;
     })
     .join('');
+  el.scrollTop = 0;
 }
 
 // ============================================================

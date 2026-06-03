@@ -506,25 +506,25 @@ input[type=text]:focus { border-color: var(--blue); }
 
 /* Game log */
 .game-log {
-  padding: .6rem .75rem;
-  height: 88px;
-  overflow: hidden;
+  padding: .5rem .75rem;
+  height: 22rem;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,.2) transparent;
 }
-.log-entry { font-size: 1rem; color: rgba(255,255,255,.55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.game-log::-webkit-scrollbar { width: 4px; }
+.game-log::-webkit-scrollbar-track { background: transparent; }
+.game-log::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 2px; }
+.log-entry { font-size: 1rem; line-height: 1.4; padding: .65rem 0; flex-shrink: 0; color: rgba(255,255,255,.55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .log-entry:first-child { font-size: 1.1rem; color: #fff; font-weight: 600; }
 .log-entry.log-lie   { color: #ff6b6b; text-shadow: 0 0 8px rgba(200,21,21,.9), 0 0 20px rgba(200,21,21,.5); }
 .log-entry.log-truth { color: #6bff8a; text-shadow: 0 0 8px rgba(24,154,32,.9), 0 0 20px rgba(24,154,32,.5); }
 .log-entry.log-lie span,
-.log-entry.log-truth span {
-  text-shadow:
-    -1px -1px 0 #fff,
-     1px -1px 0 #fff,
-    -1px  1px 0 #fff,
-     1px  1px 0 #fff;
-}
+.log-entry.log-truth span { text-shadow: none; }
 
 /* Hand area */
 .hand-area {
