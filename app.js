@@ -1749,7 +1749,7 @@ async function handleChallenge() {
   } else {
     // Honesto: el desafiante roba 1 carta y se aplica el efecto
     log = addLog(log,
-      `✓ ${localName} acusó a ${liar?.name}, pero ${liar?.name} dijo la Verdad (${cardLogName(actual)}). ${localName} roba 1.`
+      `✓ ${localName} acusó a ${liar?.name}, pero ${liar?.name} dijo la Verdad (${actual?.value === 'wild' ? 'Comodín' : actual?.value === 'wild4' ? 'Comodín +4' : cardLogName(actual)}). ${localName} roba 1.`
     );
 
     if (claimed.value === '0') {
