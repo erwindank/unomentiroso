@@ -828,23 +828,35 @@ async function handleUnoCallBtn() {
       lastActivity: firebase.firestore.FieldValue.serverTimestamp()
     });
   } else {
-    const state = roomState;
-    let { hands, players, drawPile } = state;
-    const { drawn, newDrawPile } = takeCards(drawPile, 2);
-    hands   = { ...hands, [req.playerId]: [...(hands[req.playerId] || []), ...drawn] };
-    players = players.map(p =>
-      p.id === req.playerId ? { ...p, cardCount: hands[p.id].length } : p
-    );
-    const log = addLog(state.log,
-      `🚨 ${localName} le gritó UNO a ${req.playerName}. ${req.playerName} roba 2 cartas.`
-    );
-    await db.collection('rooms').doc(currentRoomId).update({
-      hands,
-      players,
-      drawPile: newDrawPile,
-      unoCallRequired: firebase.firestore.FieldValue.delete(),
-      log,
-      lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    const roomRef = db.collection('rooms').doc(currentRoomId);
+    await db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(roomRef);
+      const state = doc.data();
+
+      // Bail out if the player already safely shouted UNO (unoCallRequired was deleted)
+      if (!state.unoCallRequired || state.unoCallRequired.playerId !== req.playerId) return;
+
+      // Bail out if they no longer have exactly 1 card
+      const reqPlayer = state.players.find(p => p.id === req.playerId);
+      if (!reqPlayer || reqPlayer.cardCount !== 1) return;
+
+      let { hands, players, drawPile } = state;
+      const { drawn, newDrawPile } = takeCards(drawPile, 2);
+      hands   = { ...hands, [req.playerId]: [...(hands[req.playerId] || []), ...drawn] };
+      players = players.map(p =>
+        p.id === req.playerId ? { ...p, cardCount: hands[p.id].length } : p
+      );
+      const log = addLog(state.log,
+        `🚨 ${localName} le gritó UNO a ${req.playerName}. ${req.playerName} roba 2 cartas.`
+      );
+      transaction.update(roomRef, {
+        hands,
+        players,
+        drawPile: newDrawPile,
+        unoCallRequired: firebase.firestore.FieldValue.delete(),
+        log,
+        lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+      });
     });
   }
 }
@@ -2095,6 +2107,7 @@ async function callUno() {
   if (myHand.length === 1) {
     const log = addLog(state.log, `${localName} dice ¡UNO! 🎴`);
     await db.collection('rooms').doc(currentRoomId).update({
+      unoCallRequired: firebase.firestore.FieldValue.delete(),
       log,
       lastActivity: firebase.firestore.FieldValue.serverTimestamp()
     });
