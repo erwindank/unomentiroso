@@ -1047,8 +1047,8 @@ function renderLog(state) {
   const el = document.getElementById('game-log');
   el.innerHTML = [...(state.log || [])].reverse()
     .map(msg => {
-      const cls = msg.includes('descubrió') ? ' log-lie'
-                : /dijo la verdad/i.test(msg) ? ' log-truth'
+      const cls = msg.includes('descubrió') || msg.includes('¡Mintió!') ? ' log-lie'
+                : /dijo la verdad/i.test(msg) || msg.includes('¡sí tenía') ? ' log-truth'
                 : msg.includes('le gritó UNO') ? ' log-uno'
                 : msg.includes('¡UNO! 🎴') ? ' log-uno-call'
                 : /intercambi/.test(msg) ? ' log-swap'
@@ -1311,7 +1311,7 @@ async function accuseWildPlayer(targetId) {
     delete newSubmitted[targetId];
 
     log = addLog(log,
-      `🎯 ${localName} acusa a ${targetName} — sin ${COLOR_NAME[wc.chosenColor]}. Recupera carta y roba 1.`);
+      `${localName} acusa a ${targetName} - ¡Mintió! No tiene ${COLOR_NAME[wc.chosenColor]}. Devuelve la carta a su mano y roba 1.`);
 
     const goChoosing = newAccusePool.length === 0;
     await db.collection('rooms').doc(currentRoomId).update({
@@ -1411,8 +1411,8 @@ function renderWildChallenge(state) {
 
   if (logEl) {
     logEl.innerHTML = [...(state.log || [])].reverse().slice(0, 6).map(msg => {
-      const cls = msg.includes('descubrió') ? ' log-lie'
-                : /dijo la verdad/i.test(msg) ? ' log-truth'
+      const cls = msg.includes('descubrió') || msg.includes('¡Mintió!') ? ' log-lie'
+                : /dijo la verdad/i.test(msg) || msg.includes('¡sí tenía') ? ' log-truth'
                 : msg.includes('le gritó UNO') ? ' log-uno'
                 : msg.includes('¡UNO! 🎴') ? ' log-uno-call'
                 : /intercambi/.test(msg) ? ' log-swap'
