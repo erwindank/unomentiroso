@@ -186,6 +186,10 @@ let chatOpen = false;
 let chatUnreadCount = 0;
 const seenMessageIds = new Set();
 
+// Notification state
+let notifEnabled = localStorage.getItem('notifEnabled') === 'true';
+let prevNotifState = null;
+
 function isLiarCard(card) {
   return card && card.liar === true;
 }
@@ -247,6 +251,7 @@ async function init() {
 }
 
 init();
+updateNotifButton();
 
 // ============================================================
 // HELPERS
@@ -681,6 +686,7 @@ function skipDisconnectedTurn(state) {
 
 function subscribeToRoom(roomId) {
   if (roomUnsub) roomUnsub();
+  prevNotifState = null;
   roomUnsub = db.collection('rooms').doc(roomId).onSnapshot(snap => {
     if (!snap.exists) return;
     roomState = snap.data();
@@ -690,6 +696,7 @@ function subscribeToRoom(roomId) {
 }
 
 function onRoomUpdate(state) {
+  checkNotifications(state);
   if (state.status === 'lobby') {
     const hasDisconnected = state.players.some(p => p.disconnected);
     if (hasDisconnected) removeDisconnectedFromLobby(state);
@@ -1284,6 +1291,80 @@ function renderSpeechBubbles(state) {
     bubble.innerHTML = `<strong>${esc(msg.name)}:</strong> ${esc(msg.text)}`;
     container.appendChild(bubble);
     setTimeout(() => bubble.remove(), 4000);
+  }
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+function toggleNotifications() {
+  if (!('Notification' in window)) return;
+  if (!notifEnabled) {
+    Notification.requestPermission().then(perm => {
+      notifEnabled = perm === 'granted';
+      localStorage.setItem('notifEnabled', notifEnabled ? 'true' : 'false');
+      updateNotifButton();
+    });
+  } else {
+    notifEnabled = false;
+    localStorage.setItem('notifEnabled', 'false');
+    updateNotifButton();
+  }
+}
+
+function updateNotifButton() {
+  const btn = document.getElementById('notif-toggle-btn');
+  if (!btn) return;
+  const active = notifEnabled && Notification.permission === 'granted';
+  btn.classList.toggle('notif-active', active);
+  btn.title = active ? 'Desactivar notificaciones' : 'Activar notificaciones';
+  btn.textContent = active ? '🔔' : '🔕';
+}
+
+function notify(title, body) {
+  if (!notifEnabled || Notification.permission !== 'granted') return;
+  if (!document.hidden && document.hasFocus()) return;
+  try { new Notification(title, { body, tag: 'unomentiroso' }); } catch (_) {}
+}
+
+function checkNotifications(state) {
+  const prev = prevNotifState;
+  prevNotifState = {
+    status: state.status,
+    currentPlayerIndex: state.currentPlayerIndex,
+    challengeOpen: !!state.challengeOpen,
+    unoCallRequiredFor: state.unoCallRequired?.playerId || null,
+  };
+  if (!prev) return;
+
+  if (prev.status === 'lobby' && state.status === 'playing') {
+    const first = state.players[state.currentPlayerIndex];
+    notify('¡La partida comenzó!', `${first?.name || '?'} va primero.`);
+    return;
+  }
+  if (prev.status !== 'ended' && state.status === 'ended') {
+    const won = state.winner === localUid;
+    notify(won ? '🏆 ¡Ganaste!' : '🃏 Partida terminada',
+           won ? '¡Felicidades!' : `Ganó ${state.winnerName || '?'}`);
+    return;
+  }
+  if (state.status !== 'playing') return;
+
+  if (prev.currentPlayerIndex !== state.currentPlayerIndex &&
+      state.players[state.currentPlayerIndex]?.id === localUid) {
+    notify('¡Es tu turno!', 'Elige una carta para jugar.');
+    return;
+  }
+  if (!prev.challengeOpen && state.challengeOpen && state.lastPlayerId !== localUid) {
+    const lp = state.players.find(p => p.id === state.lastPlayerId);
+    const c  = state.lastClaimedCard;
+    const claimed = c ? `${COLOR_NAME[c.color] || ''} ${VALUE_LABEL[c.value] || ''}`.trim() : '?';
+    notify(`${lp?.name || '?'} jugó una carta`, `Dice que jugó ${claimed}. ¿Lo crees?`);
+    return;
+  }
+  if (!prev.unoCallRequiredFor && state.unoCallRequired?.playerId === localUid) {
+    notify('¡UNO!', '¡Solo te queda 1 carta! Grita UNO antes de que alguien te atrape.');
   }
 }
 
