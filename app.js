@@ -706,7 +706,8 @@ function onRoomUpdate(state) {
     // Check if all players agreed to end — any client that detects it triggers the update;
     // Firestore's atomic write means duplicate triggers just overwrite with the same result.
     const votes = state.endVotes || [];
-    if (votes.length >= state.players.length && state.players.length > 0) {
+    const connectedPlayers = state.players.filter(p => !p.disconnected);
+    if (connectedPlayers.length > 0 && connectedPlayers.every(p => votes.includes(p.id))) {
       const result = determineWinner(state);
       db.collection('rooms').doc(currentRoomId).update({
         status: 'ended',
@@ -2708,7 +2709,7 @@ async function handleEndGameVote() {
     });
   } else {
     const log = addLog(state.log,
-      `${localName} propone terminar (${votes.length + 1}/${state.players.length}).`);
+      `${localName} propone terminar (${votes.length + 1}/${state.players.filter(p => !p.disconnected).length}).`);
     await db.collection('rooms').doc(currentRoomId).update({
       endVotes: firebase.firestore.FieldValue.arrayUnion(localUid),
       log,
@@ -2724,7 +2725,7 @@ function renderEndVoteStatus(state) {
   const hasVoted = votes.includes(localUid);
 
   statusEl.textContent = votes.length > 0
-    ? `${votes.length}/${state.players.length} quieren terminar`
+    ? `${votes.length}/${state.players.filter(p => !p.disconnected).length} quieren terminar`
     : '';
 
   if (btn) {
