@@ -2275,12 +2275,22 @@ function applyEffectsAndAdvance(state) {
   const claimed = state.lastClaimedCard;
   let { players, hands, drawPile, direction, currentPlayerIndex } = state;
   const n = players.length;
+  const activeN = players.filter(p => !p.disconnected).length;
 
   let topColor = claimed.color;
   let topValue = claimed.value;
   let logExtra = '';
 
-  const nextIdx = ((currentPlayerIndex + direction) % n + n) % n;
+  // Advances from fromIdx in dir, skipping disconnected players
+  const nextActive = (fromIdx, dir) => {
+    let idx = ((fromIdx + dir) % n + n) % n;
+    for (let i = 0; i < n && players[idx]?.disconnected; i++) {
+      idx = ((idx + dir) % n + n) % n;
+    }
+    return idx;
+  };
+
+  const nextIdx = nextActive(currentPlayerIndex, direction);
   let newIdx    = nextIdx;
 
   switch (claimed.value) {
@@ -2313,19 +2323,19 @@ function applyEffectsAndAdvance(state) {
 
     case 'skip': {
       logExtra = `${players[nextIdx]?.name} pierde su turno.`;
-      newIdx   = ((nextIdx + direction) % n + n) % n;
+      newIdx   = nextActive(nextIdx, direction);
       break;
     }
 
     case 'reverse': {
       direction = -direction;
-      if (n === 2) {
-        // Con 2 jugadores, Reverse = Skip: el mismo jugador juega de nuevo
+      if (activeN === 2) {
+        // Con 2 jugadores activos, Reverse = Skip: el mismo jugador juega de nuevo
         logExtra = `${players[nextIdx]?.name} pierde su turno (reverse).`;
         newIdx   = currentPlayerIndex;
       } else {
         logExtra = '¡Dirección invertida!';
-        newIdx   = ((currentPlayerIndex + direction) % n + n) % n;
+        newIdx   = nextActive(currentPlayerIndex, direction);
       }
       break;
     }
@@ -2337,7 +2347,7 @@ function applyEffectsAndAdvance(state) {
       hands    = { ...hands, [tid]: [...(hands[tid] || []), ...drawn] };
       players  = players.map(p => p.id === tid ? { ...p, cardCount: hands[p.id].length } : p);
       logExtra = `${players[nextIdx]?.name} roba 2 y pierde su turno.`;
-      newIdx   = ((nextIdx + direction) % n + n) % n;
+      newIdx   = nextActive(nextIdx, direction);
       break;
     }
 
@@ -2348,7 +2358,7 @@ function applyEffectsAndAdvance(state) {
       hands    = { ...hands, [tid]: [...(hands[tid] || []), ...drawn] };
       players  = players.map(p => p.id === tid ? { ...p, cardCount: hands[p.id].length } : p);
       logExtra = `${players[nextIdx]?.name} roba 4 y pierde su turno.`;
-      newIdx   = ((nextIdx + direction) % n + n) % n;
+      newIdx   = nextActive(nextIdx, direction);
       break;
     }
   }
