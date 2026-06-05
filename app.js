@@ -189,6 +189,13 @@ const seenMessageIds = new Set();
 // Notification state
 let notifEnabled = localStorage.getItem('notifEnabled') === 'true';
 let prevNotifState = null;
+let notifAudioCtx = null;
+
+function ensureNotifAudioCtx() {
+  if (notifAudioCtx) return;
+  try { notifAudioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {}
+}
+document.addEventListener('click', ensureNotifAudioCtx, { once: true });
 
 function isLiarCard(card) {
   return card && card.liar === true;
@@ -1294,6 +1301,7 @@ function renderChatPanel(state) {
   if (!chatOpen && newCount > 0) {
     chatUnreadCount += newCount;
     updateChatBadge();
+    playChatSound();
   }
 
   if (!chatOpen) return;
@@ -1358,6 +1366,10 @@ function toggleNotifications() {
       localStorage.setItem('notifEnabled', notifEnabled ? 'true' : 'false');
       updateNotifButton();
       if (notifEnabled) {
+        try {
+          notifAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          notifAudioCtx.resume();
+        } catch (_) {}
         try { new Notification('🔔 Notificaciones activadas', { body: 'Recibirás avisos del juego.', tag: 'notif-test' }); } catch (_) {}
         showVoiceToast('🔔 Notificaciones activadas');
       }
@@ -1378,9 +1390,57 @@ function updateNotifButton() {
   btn.textContent = active ? '🔔' : '🔕';
 }
 
+function playChatSound() {
+  ensureNotifAudioCtx();
+  if (!notifAudioCtx) return;
+  try {
+    notifAudioCtx.resume().then(() => {
+      const ctx = notifAudioCtx;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'triangle';
+      osc.frequency.value = 520;
+      const t = ctx.currentTime;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.2, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      osc.start(t);
+      osc.stop(t + 0.18);
+    });
+  } catch (_) {}
+}
+
+function playNotifSound() {
+  ensureNotifAudioCtx();
+  if (!notifAudioCtx) return;
+  try {
+    notifAudioCtx.resume().then(() => {
+      const ctx = notifAudioCtx;
+      const notes = [880, 1108];
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        const t = ctx.currentTime + i * 0.12;
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(0.3, t + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+        osc.start(t);
+        osc.stop(t + 0.25);
+      });
+    });
+  } catch (_) {}
+}
+
 function notify(title, body) {
   if (!notifEnabled || Notification.permission !== 'granted') return;
   if (!document.hidden && document.hasFocus()) return;
+  playNotifSound();
   try { new Notification(title, { body, tag: 'unomentiroso' }); } catch (_) {}
 }
 
