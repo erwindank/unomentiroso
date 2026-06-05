@@ -197,6 +197,13 @@ function ensureNotifAudioCtx() {
 }
 document.addEventListener('click', ensureNotifAudioCtx, { once: true });
 
+// Music state
+const _savedMusicPref = localStorage.getItem('musicEnabled');
+let musicEnabled = _savedMusicPref === null ? null : _savedMusicPref === 'true';
+let musicMasterGain = null;
+let musicPlaying = false;
+let musicLoopTimer = null;
+
 function isLiarCard(card) {
   return card && card.liar === true;
 }
@@ -255,10 +262,20 @@ async function init() {
     localName = savedName;
     await tryRejoin(savedRoom);
   }
+
+  if (musicEnabled === true) {
+    document.addEventListener('click', function startMusicOnInteraction() {
+      ensureNotifAudioCtx();
+      if (!musicPlaying) startMusic();
+    }, { once: true });
+  } else if (musicEnabled === null && !savedRoom) {
+    setTimeout(showMusicPrompt, 700);
+  }
 }
 
 init();
 updateNotifButton();
+updateMusicButton();
 
 // ============================================================
 // HELPERS
@@ -1435,6 +1452,145 @@ function playNotifSound() {
       });
     });
   } catch (_) {}
+}
+
+// ============================================================
+// BACKGROUND MUSIC
+// ============================================================
+
+// 4-bar loop in D major at 104 BPM
+// Each entry: [beat_offset, duration_beats, freq_Hz, volume, osc_type]
+const MUSIC_BPM = 104;
+const MUSIC_BEAT = 60 / MUSIC_BPM;
+const MUSIC_TOTAL_BEATS = 16;
+const MUSIC_SCORE = [
+  // Melody (triangle wave)
+  [0,    1.0, 293.7, 0.18, 'triangle'], // D4
+  [1,    0.5, 329.6, 0.14, 'triangle'], // E4
+  [1.5,  0.5, 392.0, 0.16, 'triangle'], // G4
+  [2,    1.5, 440.0, 0.20, 'triangle'], // A4
+  [3.5,  0.5, 493.9, 0.16, 'triangle'], // B4
+  [4,    1.0, 440.0, 0.18, 'triangle'], // A4
+  [5,    0.5, 392.0, 0.14, 'triangle'], // G4
+  [5.5,  0.5, 369.9, 0.13, 'triangle'], // F#4
+  [6,    1.0, 329.6, 0.16, 'triangle'], // E4
+  [7,    1.0, 293.7, 0.18, 'triangle'], // D4
+  [8,    1.0, 392.0, 0.18, 'triangle'], // G4
+  [9,    0.5, 440.0, 0.14, 'triangle'], // A4
+  [9.5,  0.5, 493.9, 0.14, 'triangle'], // B4
+  [10,   1.0, 587.3, 0.20, 'triangle'], // D5
+  [11,   1.0, 554.4, 0.18, 'triangle'], // C#5
+  [12,   0.5, 493.9, 0.14, 'triangle'], // B4
+  [12.5, 0.5, 440.0, 0.14, 'triangle'], // A4
+  [13,   1.0, 392.0, 0.16, 'triangle'], // G4
+  [14,   1.0, 369.9, 0.15, 'triangle'], // F#4
+  [15,   1.0, 293.7, 0.22, 'triangle'], // D4
+  // Bass (sine wave)
+  [0,    2,   146.8, 0.14, 'sine'],     // D3
+  [2,    2,   110.0, 0.12, 'sine'],     // A2
+  [4,    2,   110.0, 0.13, 'sine'],     // A2
+  [6,    1,   164.8, 0.11, 'sine'],     // E3
+  [7,    1,   146.8, 0.11, 'sine'],     // D3
+  [8,    1,   196.0, 0.12, 'sine'],     // G3
+  [9,    1,   196.0, 0.11, 'sine'],     // G3
+  [10,   2,   146.8, 0.12, 'sine'],     // D3
+  [12,   2,   110.0, 0.13, 'sine'],     // A2
+  [14,   2,   146.8, 0.12, 'sine'],     // D3
+];
+
+function scheduleMusicNote(ctx, startTime, durationBeats, freq, vol, oscType) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(musicMasterGain);
+  osc.type = oscType;
+  osc.frequency.value = freq;
+  const dur = durationBeats * MUSIC_BEAT;
+  gain.gain.setValueAtTime(0, startTime);
+  gain.gain.linearRampToValueAtTime(vol, startTime + 0.02);
+  gain.gain.setValueAtTime(vol, startTime + dur - 0.06);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + dur + 0.04);
+  osc.start(startTime);
+  osc.stop(startTime + dur + 0.06);
+}
+
+function scheduleMusicLoop(loopStartTime) {
+  const ctx = notifAudioCtx;
+  if (!ctx || !musicPlaying) return;
+  MUSIC_SCORE.forEach(([beat, dur, freq, vol, type]) => {
+    scheduleMusicNote(ctx, loopStartTime + beat * MUSIC_BEAT, dur, freq, vol, type);
+  });
+  const loopDuration = MUSIC_TOTAL_BEATS * MUSIC_BEAT;
+  musicLoopTimer = setTimeout(() => {
+    if (musicPlaying) scheduleMusicLoop(loopStartTime + loopDuration);
+  }, (loopDuration - 0.5) * 1000);
+}
+
+function startMusic() {
+  if (musicPlaying || !notifAudioCtx) return;
+  musicPlaying = true;
+  notifAudioCtx.resume().then(() => {
+    musicMasterGain = notifAudioCtx.createGain();
+    musicMasterGain.gain.setValueAtTime(0, notifAudioCtx.currentTime);
+    musicMasterGain.gain.linearRampToValueAtTime(0.5, notifAudioCtx.currentTime + 2.0);
+    musicMasterGain.connect(notifAudioCtx.destination);
+    scheduleMusicLoop(notifAudioCtx.currentTime + 0.15);
+    updateMusicButton();
+  });
+}
+
+function stopMusic() {
+  musicPlaying = false;
+  clearTimeout(musicLoopTimer);
+  if (musicMasterGain && notifAudioCtx) {
+    const oldGain = musicMasterGain;
+    musicMasterGain = null;
+    oldGain.gain.cancelScheduledValues(notifAudioCtx.currentTime);
+    oldGain.gain.setTargetAtTime(0, notifAudioCtx.currentTime, 0.2);
+    setTimeout(() => { try { oldGain.disconnect(); } catch (_) {} }, 1200);
+  }
+  updateMusicButton();
+}
+
+function toggleMusic() {
+  if (musicPlaying) {
+    musicEnabled = false;
+    localStorage.setItem('musicEnabled', 'false');
+    stopMusic();
+  } else {
+    musicEnabled = true;
+    localStorage.setItem('musicEnabled', 'true');
+    ensureNotifAudioCtx();
+    startMusic();
+  }
+}
+
+function enableMusic() {
+  musicEnabled = true;
+  localStorage.setItem('musicEnabled', 'true');
+  document.getElementById('music-prompt')?.classList.add('hidden');
+  ensureNotifAudioCtx();
+  startMusic();
+  updateMusicButton();
+}
+
+function disableMusic() {
+  musicEnabled = false;
+  localStorage.setItem('musicEnabled', 'false');
+  document.getElementById('music-prompt')?.classList.add('hidden');
+  updateMusicButton();
+}
+
+function showMusicPrompt() {
+  document.getElementById('music-prompt')?.classList.remove('hidden');
+}
+
+function updateMusicButton() {
+  const btn = document.getElementById('music-toggle-btn');
+  if (!btn) return;
+  btn.textContent = musicPlaying ? '🎵' : '🔇';
+  btn.title = musicPlaying ? 'Silenciar música' : 'Activar música';
+  btn.classList.toggle('music-active', musicPlaying);
 }
 
 function notify(title, body) {

@@ -76,6 +76,7 @@
     <div class="game-topbar-actions">
       <button class="btn btn-ghost btn-sm" id="end-game-btn" onclick="handleEndGameVote()">Terminar</button>
       <button class="btn btn-ghost btn-sm btn-notif" id="notif-toggle-btn" onclick="toggleNotifications()" title="Activar notificaciones">🔕</button>
+      <button class="btn btn-ghost btn-sm btn-music" id="music-toggle-btn" onclick="toggleMusic()" title="Música">🎵</button>
       <button class="btn btn-ghost btn-sm btn-voice" id="voice-toggle-btn" onclick="toggleVoice()" title="Unirse al chat de voz">🎤</button>
       <button class="btn btn-ghost btn-sm btn-chat" id="chat-toggle-btn" onclick="toggleChat()" title="Chat">💬<span id="chat-unread" class="chat-unread hidden">0</span></button>
       <button class="btn btn-danger btn-sm" onclick="handleLeaveGame()">Salir</button>
@@ -243,6 +244,19 @@
 
 <!-- Voice toast -->
 <div id="voice-toast" class="voice-toast hidden"></div>
+
+<!-- Music Prompt -->
+<div id="music-prompt" class="music-prompt hidden">
+  <div class="music-prompt-card">
+    <div class="music-prompt-icon">🎵</div>
+    <h3 class="music-prompt-title">¿Con música de fondo?</h3>
+    <p class="music-prompt-desc">Añade ambiente a la partida</p>
+    <div class="music-prompt-btns">
+      <button class="btn btn-primary" onclick="enableMusic()">Sí, con música</button>
+      <button class="btn btn-ghost" onclick="disableMusic()">Sin música</button>
+    </div>
+  </div>
+</div>
 
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
