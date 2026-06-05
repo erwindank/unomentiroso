@@ -2030,6 +2030,7 @@ function isClaimPlayable(claimed, state) {
 // ============================================================
 
 async function doPlayCard(actualCard, claimedCard, cardIndex) {
+  drawnCardState = null;
   const state = roomState;
   const myHand  = [...(state.hands?.[localUid] || [])];
   const newHand = myHand.filter((_, i) => i !== cardIndex);
