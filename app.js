@@ -240,6 +240,8 @@ function isActualPlayable(card, state) {
 // ============================================================
 
 async function init() {
+  await handleSpotifyCallback();
+
   try {
     await auth.signInAnonymously();
     localUid = auth.currentUser.uid;
@@ -340,11 +342,18 @@ function showScreen(id) {
       document.getElementById('chat-panel')?.classList.add('hidden');
     }
     leaveVoice();
+    stopSpotifyPolling();
+    stopListeningSpotifyTracks();
   }
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-' + id).classList.add('active');
   const gameCodeText = document.getElementById('game-room-code-text');
   if (gameCodeText) gameCodeText.textContent = currentRoomId || '';
+  if (id === 'game') {
+    listenSpotifyTracks();
+    if (isSpotifyConnected()) startSpotifyPolling();
+    updateSpotifyButton();
+  }
 }
 
 function showLandingError(msg) {
@@ -1591,6 +1600,271 @@ function updateMusicButton() {
   btn.textContent = musicPlaying ? '🎵' : '🔇';
   btn.title = musicPlaying ? 'Silenciar música' : 'Activar música';
   btn.classList.toggle('music-active', musicPlaying);
+}
+
+// ============================================================
+// SPOTIFY INTEGRATION
+// ============================================================
+
+const SPOTIFY_CLIENT_ID   = '3b539ada3a4b43f48efdb4a790ced26c';
+const SPOTIFY_REDIRECT_URI = 'https://erwindank.github.io/unomentiroso/';
+const SPOTIFY_SCOPES       = 'user-read-currently-playing user-read-playback-state';
+const SPOTIFY_SVG_SMALL    = `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>`;
+const SPOTIFY_SVG_LARGE    = `<svg class="spotify-modal-logo" viewBox="0 0 24 24" width="36" height="36" fill="#1DB954"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>`;
+
+let spotifyPollTimer      = null;
+let spotifyTracksRef      = null;
+let spotifyTracksData     = {};
+
+// ----- PKCE helpers -----
+
+function generateCodeVerifier() {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return btoa(String.fromCharCode(...arr)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+
+async function generateCodeChallenge(verifier) {
+  const data   = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+
+// ----- Auth -----
+
+async function initiateSpotifyAuth() {
+  const verifier   = generateCodeVerifier();
+  const challenge  = await generateCodeChallenge(verifier);
+  localStorage.setItem('spotify_code_verifier', verifier);
+  const params = new URLSearchParams({
+    client_id:             SPOTIFY_CLIENT_ID,
+    response_type:         'code',
+    redirect_uri:          SPOTIFY_REDIRECT_URI,
+    scope:                 SPOTIFY_SCOPES,
+    code_challenge_method: 'S256',
+    code_challenge:        challenge,
+  });
+  window.location.href = `https://accounts.spotify.com/authorize?${params}`;
+}
+
+async function handleSpotifyCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code   = params.get('code');
+  if (!code) return;
+  window.history.replaceState({}, '', window.location.pathname);
+  const verifier = localStorage.getItem('spotify_code_verifier');
+  if (!verifier) return;
+  try {
+    const res  = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id:     SPOTIFY_CLIENT_ID,
+        grant_type:    'authorization_code',
+        code,
+        redirect_uri:  SPOTIFY_REDIRECT_URI,
+        code_verifier: verifier,
+      }),
+    });
+    const data = await res.json();
+    if (data.access_token) {
+      localStorage.setItem('spotify_access_token',  data.access_token);
+      localStorage.setItem('spotify_refresh_token', data.refresh_token);
+      localStorage.setItem('spotify_expires_at',    Date.now() + data.expires_in * 1000);
+    }
+  } catch (_) {}
+  localStorage.removeItem('spotify_code_verifier');
+}
+
+async function refreshSpotifyToken() {
+  const rt = localStorage.getItem('spotify_refresh_token');
+  if (!rt) return false;
+  try {
+    const res  = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type:    'refresh_token',
+        refresh_token: rt,
+        client_id:     SPOTIFY_CLIENT_ID,
+      }),
+    });
+    const data = await res.json();
+    if (data.access_token) {
+      localStorage.setItem('spotify_access_token', data.access_token);
+      localStorage.setItem('spotify_expires_at',   Date.now() + data.expires_in * 1000);
+      if (data.refresh_token) localStorage.setItem('spotify_refresh_token', data.refresh_token);
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+async function getSpotifyToken() {
+  const exp = parseInt(localStorage.getItem('spotify_expires_at') || '0');
+  if (Date.now() > exp - 60000) {
+    const ok = await refreshSpotifyToken();
+    if (!ok) return null;
+  }
+  return localStorage.getItem('spotify_access_token');
+}
+
+function isSpotifyConnected() {
+  return !!localStorage.getItem('spotify_access_token');
+}
+
+function disconnectSpotify() {
+  stopSpotifyPolling();
+  clearSpotifyTrackFromRoom();
+  localStorage.removeItem('spotify_access_token');
+  localStorage.removeItem('spotify_refresh_token');
+  localStorage.removeItem('spotify_expires_at');
+  updateSpotifyButton();
+  closeSpotifyModal();
+}
+
+// ----- Now Playing -----
+
+async function fetchNowPlaying() {
+  const token = await getSpotifyToken();
+  if (!token) return;
+  try {
+    const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 204 || res.status === 404) { updateSpotifyTrackInRoom(null); return; }
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.is_playing || !data.item) { updateSpotifyTrackInRoom(null); return; }
+    updateSpotifyTrackInRoom({
+      title:    data.item.name,
+      artist:   data.item.artists.map(a => a.name).join(', '),
+      albumArt: data.item.album.images.at(-1)?.url || null,
+    });
+  } catch (_) {}
+}
+
+function startSpotifyPolling() {
+  stopSpotifyPolling();
+  fetchNowPlaying();
+  spotifyPollTimer = setInterval(fetchNowPlaying, 30000);
+}
+
+function stopSpotifyPolling() {
+  clearInterval(spotifyPollTimer);
+  spotifyPollTimer = null;
+}
+
+// ----- RTDB track sharing -----
+
+function updateSpotifyTrackInRoom(track) {
+  if (!currentRoomId || !localUid) return;
+  const ref = rtdb.ref(`rooms/${currentRoomId}/spotifyTracks/${localUid}`);
+  if (track) {
+    ref.set(track);
+    ref.onDisconnect().remove();
+  } else {
+    ref.remove();
+  }
+}
+
+function clearSpotifyTrackFromRoom() {
+  if (!currentRoomId || !localUid) return;
+  rtdb.ref(`rooms/${currentRoomId}/spotifyTracks/${localUid}`).remove();
+}
+
+// ----- Carousel -----
+
+function listenSpotifyTracks() {
+  stopListeningSpotifyTracks();
+  if (!currentRoomId) return;
+  spotifyTracksRef = rtdb.ref(`rooms/${currentRoomId}/spotifyTracks`);
+  spotifyTracksRef.on('value', snap => {
+    spotifyTracksData = snap.val() || {};
+    renderNowPlayingCarousel();
+  });
+}
+
+function stopListeningSpotifyTracks() {
+  if (spotifyTracksRef) { spotifyTracksRef.off('value'); spotifyTracksRef = null; }
+  spotifyTracksData = {};
+  renderNowPlayingCarousel();
+}
+
+function renderNowPlayingCarousel() {
+  const container = document.getElementById('now-playing-carousel');
+  if (!container) return;
+  const entries = Object.entries(spotifyTracksData);
+  if (!entries.length) { container.classList.add('hidden'); return; }
+  container.classList.remove('hidden');
+  container.innerHTML = entries.map(([uid, track]) => {
+    const player    = roomState?.players?.find(p => p.id === uid);
+    const name      = player ? esc(player.name) : '';
+    const artHTML   = track.albumArt
+      ? `<img class="now-playing-art" src="${esc(track.albumArt)}" alt="" loading="lazy">`
+      : `<div class="now-playing-art-placeholder">♪</div>`;
+    return `<div class="now-playing-item">
+      ${artHTML}
+      <div class="now-playing-text">
+        <span class="now-playing-player">${name}</span>
+        <span class="now-playing-title">${esc(track.title)}</span>
+        <span class="now-playing-artist">${esc(track.artist)}</span>
+      </div>
+      <svg class="now-playing-spotify-logo" viewBox="0 0 24 24" width="10" height="10" fill="#1DB954"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+    </div>`;
+  }).join('');
+}
+
+// ----- Modal -----
+
+function openSpotifyModal() {
+  const card = document.getElementById('spotify-modal-card');
+  if (!card) return;
+  if (isSpotifyConnected()) {
+    const track = spotifyTracksData[localUid];
+    const trackHTML = track
+      ? `<div class="spotify-modal-track">
+          ${track.albumArt ? `<img class="spotify-modal-art" src="${esc(track.albumArt)}" alt="">` : ''}
+          <div style="min-width:0">
+            <div class="spotify-modal-track-title">${esc(track.title)}</div>
+            <div class="spotify-modal-track-artist">${esc(track.artist)}</div>
+          </div>
+        </div>`
+      : `<p class="spotify-modal-desc">Sin reproducción activa ahora mismo.</p>`;
+    card.innerHTML = `
+      ${SPOTIFY_SVG_LARGE}
+      <div class="spotify-modal-connected">● Conectado a Spotify</div>
+      ${trackHTML}
+      <div class="spotify-modal-btns">
+        <button class="btn btn-ghost btn-sm" onclick="disconnectSpotify()">Desconectar</button>
+        <button class="btn btn-primary btn-sm" onclick="closeSpotifyModal()">Cerrar</button>
+      </div>`;
+  } else {
+    card.innerHTML = `
+      ${SPOTIFY_SVG_LARGE}
+      <h3 class="spotify-modal-title">Conectar Spotify</h3>
+      <p class="spotify-modal-desc">Comparte lo que estás escuchando con los demás jugadores. Aparecerá en la barra superior.</p>
+      <div class="spotify-modal-btns">
+        <button class="btn spotify-connect-btn btn-sm" onclick="initiateSpotifyAuth()">Conectar cuenta</button>
+        <button class="btn btn-ghost btn-sm" onclick="closeSpotifyModal()">Cancelar</button>
+      </div>`;
+  }
+  document.getElementById('spotify-modal').classList.remove('hidden');
+}
+
+function closeSpotifyModal() {
+  document.getElementById('spotify-modal')?.classList.add('hidden');
+}
+
+function spotifyModalBackdropClick(e) {
+  if (e.target === document.getElementById('spotify-modal')) closeSpotifyModal();
+}
+
+function updateSpotifyButton() {
+  const btn = document.getElementById('spotify-btn');
+  if (!btn) return;
+  btn.classList.toggle('spotify-active', isSpotifyConnected());
+  btn.title = isSpotifyConnected() ? 'Spotify conectado' : 'Conectar Spotify';
 }
 
 function notify(title, body) {
@@ -2870,6 +3144,7 @@ async function handleLeaveLobby() {
   const newPlayers = state.players.filter(p => p.id !== localUid);
   const newReadyVotes = (state.readyVotes || []).filter(id => id !== localUid);
 
+  clearSpotifyTrackFromRoom();
   teardownPresence();
   if (roomUnsub) { roomUnsub(); roomUnsub = null; }
   sessionStorage.clear();
@@ -2912,6 +3187,7 @@ async function handleLeaveGame() {
   const newEndVotes = (state.endVotes || []).filter(id => id !== localUid);
   const leaveLog = addLog(state.log, `${localName} salió de la partida.`);
 
+  clearSpotifyTrackFromRoom();
   teardownPresence();
   if (roomUnsub) { roomUnsub(); roomUnsub = null; }
   sessionStorage.clear();
@@ -3092,6 +3368,7 @@ function showWinnerError(msg) {
 }
 
 function returnToMain() {
+  clearSpotifyTrackFromRoom();
   teardownPresence();
   if (roomUnsub) { roomUnsub(); roomUnsub = null; }
   currentRoomId = null;
