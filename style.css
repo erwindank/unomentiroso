@@ -237,6 +237,11 @@ input[type=text]:focus { border-color: var(--blue); }
 .prev-badge  { font-size: .6rem; color: #a78bfa;  font-weight: 400; letter-spacing: .02em; margin-left: .3rem; }
 .ready-badge { font-size: .6rem; color: #4ade80;  font-weight: 600; letter-spacing: .02em; margin-left: .3rem; }
 .ready-confirmed { color: #4ade80; font-weight: 600; }
+.player-item.ai-player { border-left: 3px solid #7c3aed; opacity: .9; }
+.btn-remove-bot { background: none; border: none; color: #f87171; font-size: 1rem; cursor: pointer; margin-left: .4rem; line-height: 1; padding: 0 .2rem; vertical-align: middle; }
+.btn-remove-bot:hover { color: #ef4444; }
+.btn.btn-bot { background: #3b1a6b; color: #d8b4fe; border: 1px solid #7c3aed; font-size: .85rem; padding: .4rem 1rem; }
+.btn.btn-bot:hover { background: #4c2889; }
 
 /* Card back (mini — opponent hand) */
 .card-back.mini {

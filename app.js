@@ -176,6 +176,9 @@ window.addEventListener('focus', refreshPresence);
 // iOS/Android page lifecycle freeze/resume
 window.addEventListener('resume', refreshPresence);
 
+// AI state
+let aiThinking = false;
+
 // Ephemeral play state (never stored in Firestore)
 let selectedCardIdx = null;
 let selectedActualCard = null;
@@ -821,6 +824,7 @@ function onRoomUpdate(state) {
     }
     showScreen('game');
     renderGame(state);
+    maybeRunAI(state);
   } else if (state.status === 'ended') {
     showScreen('winner');
     renderWinner(state);
@@ -838,14 +842,19 @@ function renderLobby(state) {
   const readyVotes = state.readyVotes || [];
   const isRematch  = prevNames.length > 0;
 
+  const isHost = state.hostId === localUid;
   document.getElementById('player-list').innerHTML = state.players.map(p => {
     const isReady   = readyVotes.includes(p.id);
     const wasHere   = isRematch && prevNames.includes(p.name);
-    return `<div class="player-item ${p.id === localUid ? 'me' : ''} ${p.disconnected ? 'player-disconnected' : ''}">
+    const removeBtn = (isHost && p.isAI)
+      ? `<button class="btn-remove-bot" onclick="handleRemoveBot('${p.id}')" title="Eliminar bot">×</button>`
+      : '';
+    return `<div class="player-item ${p.id === localUid ? 'me' : ''} ${p.disconnected ? 'player-disconnected' : ''} ${p.isAI ? 'ai-player' : ''}">
       ${p.id === state.hostId ? '👑 ' : ''}${esc(p.name)}
       ${wasHere ? '<span class="prev-badge">vuelve</span>' : ''}
       ${isReady  ? '<span class="ready-badge">✓ listo</span>' : ''}
       ${p.disconnected ? ' <span class="dc-badge">desconectado</span>' : ''}
+      ${removeBtn}
     </div>`;
   }).join('');
 
@@ -865,7 +874,6 @@ function renderLobby(state) {
     readyArea.innerHTML = '';
   }
 
-  const isHost  = state.hostId === localUid;
   const canStart = state.players.length >= 2;
   const startBtn = document.getElementById('start-btn');
   const waitMsg  = document.getElementById('waiting-msg');
@@ -876,6 +884,19 @@ function renderLobby(state) {
   if (isHost) {
     startBtn.disabled = !canStart;
     startBtn.textContent = canStart ? 'Iniciar partida' : 'Esperando jugadores…';
+  }
+
+  // Add Bot button (host only)
+  let botArea = document.getElementById('lobby-bot-area');
+  if (!botArea) {
+    botArea = document.createElement('div');
+    botArea.id = 'lobby-bot-area';
+    document.querySelector('.lobby-actions').appendChild(botArea);
+  }
+  if (isHost && state.players.length < 10) {
+    botArea.innerHTML = `<button class="btn btn-bot" onclick="handleAddBot()">+ Agregar Bot 🤖</button>`;
+  } else {
+    botArea.innerHTML = '';
   }
 }
 
@@ -922,6 +943,30 @@ async function handleStart() {
     winnerName: null,
     winnerReason: null,
     endVotes: [],
+    lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+async function handleAddBot() {
+  if (!roomState || roomState.status !== 'lobby') return;
+  if (roomState.hostId !== localUid) return;
+  if (roomState.players.length >= 10) return;
+  const botCount = roomState.players.filter(p => p.isAI).length;
+  const botName  = botCount === 0 ? '🤖 Bot' : `🤖 Bot ${botCount + 1}`;
+  const botId    = 'ai-' + Math.random().toString(36).slice(2, 9);
+  await db.collection('rooms').doc(currentRoomId).update({
+    players: firebase.firestore.FieldValue.arrayUnion(
+      { id: botId, name: botName, cardCount: 0, isAI: true }
+    ),
+    lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+async function handleRemoveBot(botId) {
+  if (!roomState || roomState.hostId !== localUid) return;
+  const newPlayers = roomState.players.filter(p => p.id !== botId);
+  await db.collection('rooms').doc(currentRoomId).update({
+    players: newPlayers,
     lastActivity: firebase.firestore.FieldValue.serverTimestamp()
   });
 }
@@ -3594,6 +3639,603 @@ window.addEventListener('beforeunload', () => {
     voiceActiveRef.remove();
   }
 });
+
+// ============================================================
+// AI PLAYER ENGINE
+// ============================================================
+
+function scheduleAiAction(fn) {
+  if (aiThinking) return;
+  aiThinking = true;
+  const delay = 700 + Math.random() * 900;
+  setTimeout(async () => {
+    try { await fn(); }
+    catch (e) { console.error('[AI]', e); }
+    finally { aiThinking = false; }
+  }, delay);
+}
+
+function maybeRunAI(state) {
+  if (state.hostId !== localUid) return;
+  if (aiThinking) return;
+  if (state.status !== 'playing') return;
+
+  const wc = state.wildChallenge;
+  if (wc) {
+    const aiNeeded = (wc.playersNeeded || []).find(id =>
+      state.players.find(p => p.id === id)?.isAI
+    );
+    if (wc.phase === 'collecting' && aiNeeded) {
+      const aiPlayer = state.players.find(p => p.id === aiNeeded);
+      scheduleAiAction(() => aiSubmitWildCard(state, aiPlayer));
+      return;
+    }
+    const aiChooser = state.players.find(p => p.id === wc.chooserId && p.isAI);
+    if (aiChooser) {
+      if (wc.phase === 'accusing' && (wc.accusePool || []).length > 0) {
+        scheduleAiAction(() => aiAccuseWildPlayer(state, aiChooser));
+        return;
+      }
+      if (wc.phase === 'resolving') {
+        scheduleAiAction(() => aiDiscardWildResolved(state, aiChooser));
+        return;
+      }
+      if (wc.phase === 'choosing') {
+        scheduleAiAction(() => aiFinalizeWildColor(state, aiChooser));
+        return;
+      }
+    }
+    return;
+  }
+
+  if (state.sevenSwapPending) {
+    const aiChooser = state.players.find(p => p.id === state.sevenSwapPending.chooserId && p.isAI);
+    if (aiChooser) { scheduleAiAction(() => aiExecuteSevenSwap(state, aiChooser)); return; }
+    return;
+  }
+
+  if (state.challengeOpen) {
+    const believes = state.challengeBelieves || [];
+    const aiVoter = state.players.find(p =>
+      p.isAI && p.id !== state.lastPlayerId && !p.disconnected && !believes.includes(p.id)
+    );
+    if (aiVoter) { scheduleAiAction(() => aiChallengeOrBelieve(state, aiVoter)); return; }
+    return;
+  }
+
+  if (state.unoCallRequired) {
+    const req = state.unoCallRequired;
+    const aiOwner = state.players.find(p => p.id === req.playerId && p.isAI);
+    if (aiOwner) { scheduleAiAction(() => aiCallUno(state, aiOwner)); return; }
+  }
+
+  const currentPlayer = state.players[state.currentPlayerIndex];
+  if (currentPlayer?.isAI) {
+    scheduleAiAction(() => aiTakeTurn(state, currentPlayer));
+  }
+}
+
+// ---- Decision helpers ----
+
+function aiChooseColor(hand) {
+  const counts = { red: 0, yellow: 0, green: 0, blue: 0 };
+  for (const c of hand) { if (counts[c.color] !== undefined) counts[c.color]++; }
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'red';
+}
+
+function aiPickSwapTarget(state, aiId) {
+  const others = state.players.filter(p => p.id !== aiId && !p.disconnected);
+  return others.sort((a, b) => a.cardCount - b.cardCount)[0] || others[0];
+}
+
+function aiBuildBluffClaim(state) {
+  const topColor = state.topColor;
+  if (Math.random() < 0.35) return { color: topColor, value: 'wild4' };
+  const vals = ['skip', 'reverse', 'draw2', '8', '9', state.topValue];
+  return { color: topColor, value: vals[Math.floor(Math.random() * vals.length)] };
+}
+
+// ---- Main turn function ----
+
+async function aiTakeTurn(state, aiPlayer) {
+  const aiId   = aiPlayer.id;
+  const aiName = aiPlayer.name;
+  const hand   = state.hands?.[aiId] || [];
+  const indexed = hand.map((card, idx) => ({ card, idx }));
+
+  const normalPlayable = indexed.filter(({ card }) =>
+    !isLiarCard(card) && (card.value === 'wild' || isActualPlayable(card, state))
+  );
+  const liarMatchable = indexed.filter(({ card }) =>
+    isLiarCard(card) && isActualPlayable(card, state)
+  );
+  const liarAny = indexed.filter(({ card }) => isLiarCard(card));
+
+  if (normalPlayable.length > 0) {
+    const scored = normalPlayable
+      .map(({ card, idx }) => ({ card, idx, score: CARD_POINTS[card.value] || 0 }))
+      .sort((a, b) => b.score - a.score);
+    const chosen = scored[0];
+    const chosenColor = chosen.card.value === 'wild' ? aiChooseColor(hand) : null;
+    await aiPlayNormalCard(state, aiId, aiName, chosen.card, chosen.idx, chosenColor);
+    return;
+  }
+
+  const liarCandidates = liarMatchable.length > 0 ? liarMatchable : liarAny;
+  if (liarCandidates.length > 0) {
+    const { card, idx } = liarCandidates[Math.floor(Math.random() * liarCandidates.length)];
+    const honestClaim   = { color: card.color, value: card.value };
+    const honestOk      = isClaimPlayable(honestClaim, state);
+    const useHonest     = honestOk && Math.random() < 0.55;
+    const claimedCard   = useHonest ? honestClaim : aiBuildBluffClaim(state);
+    await aiDoPlayCard(state, aiId, aiName, card, claimedCard, idx);
+    return;
+  }
+
+  await aiDrawAndPass(state, aiId, aiName);
+}
+
+// ---- Play normal card (face-up) ----
+
+async function aiPlayNormalCard(state, aiId, aiName, actualCard, cardIndex, chosenColor) {
+  if (actualCard.value === '7') {
+    await aiPlayNormalCardWithSwap(state, aiId, aiName, actualCard, cardIndex);
+    return;
+  }
+
+  const hand    = [...(state.hands?.[aiId] || [])];
+  const newHand = hand.filter((_, i) => i !== cardIndex);
+  const won     = newHand.length === 0;
+
+  let topColor = actualCard.color;
+  let topValue = actualCard.value;
+  let log = addLog(state.log,
+    `${aiName} jugó ${COLOR_NAME[actualCard.color]} ${VALUE_LABEL[actualCard.value]} boca arriba.`
+  );
+
+  const newHands = { ...state.hands, [aiId]: newHand };
+  let players = state.players.map(p =>
+    p.id === aiId ? { ...p, cardCount: newHand.length } : p
+  );
+
+  if (actualCard.value === 'wild') {
+    topColor = chosenColor || aiChooseColor(hand);
+    log = addLog(log, `${aiName} eligió el color ${COLOR_NAME[topColor]}.`);
+  }
+
+  if (actualCard.value === '0') {
+    const passedHands = passHands(newHands, state.players, state.direction);
+    Object.assign(newHands, passedHands);
+    players = players.map(p => ({ ...p, cardCount: (newHands[p.id] || []).length }));
+    log = addLog(log, 'Todos pasan su mano en la dirección actual.');
+  }
+
+  const update = {
+    players, hands: newHands, topColor, topValue,
+    currentPlayerIndex: nextPlayerIndex(state),
+    challengeOpen: false, lastActualCard: null, lastClaimedCard: null,
+    log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  update.unoCallRequired = (newHand.length === 1 && !won)
+    ? { playerId: aiId, playerName: aiName }
+    : firebase.firestore.FieldValue.delete();
+  if (won) { update.status = 'ended'; update.winner = aiId; update.winnerName = aiName; }
+
+  await db.collection('rooms').doc(currentRoomId).update(update);
+}
+
+async function aiPlayNormalCardWithSwap(state, aiId, aiName, actualCard, cardIndex) {
+  const hand        = [...(state.hands?.[aiId] || [])];
+  const handAfterPlay = hand.filter((_, i) => i !== cardIndex);
+  const won         = handAfterPlay.length === 0;
+
+  let log = addLog(state.log,
+    `${aiName} jugó ${COLOR_NAME[actualCard.color]} ${VALUE_LABEL[actualCard.value]} boca arriba.`
+  );
+
+  const newHands = { ...state.hands, [aiId]: handAfterPlay };
+  let players = state.players.map(p =>
+    p.id === aiId ? { ...p, cardCount: handAfterPlay.length } : p
+  );
+
+  if (!won) {
+    const target = aiPickSwapTarget(state, aiId);
+    if (target) {
+      newHands[aiId]        = newHands[target.id] || [];
+      newHands[target.id]   = handAfterPlay;
+      players = players.map(p => ({ ...p, cardCount: (newHands[p.id] || []).length }));
+      log = addLog(log, `${aiName} intercambió manos con ${target.name}.`);
+    }
+  }
+
+  const myFinalHand = newHands[aiId];
+  const update = {
+    players, hands: newHands,
+    topColor: actualCard.color, topValue: actualCard.value,
+    currentPlayerIndex: nextPlayerIndex(state),
+    challengeOpen: false, lastActualCard: null, lastClaimedCard: null,
+    sevenSwapPending: firebase.firestore.FieldValue.delete(),
+    log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  update.unoCallRequired = (!won && myFinalHand.length === 1)
+    ? { playerId: aiId, playerName: aiName }
+    : firebase.firestore.FieldValue.delete();
+  if (won) { update.status = 'ended'; update.winner = aiId; update.winnerName = aiName; }
+
+  await db.collection('rooms').doc(currentRoomId).update(update);
+}
+
+// ---- Play liar card (face-down) ----
+
+async function aiDoPlayCard(state, aiId, aiName, actualCard, claimedCard, cardIndex) {
+  const hand    = [...(state.hands?.[aiId] || [])];
+  const newHand = hand.filter((_, i) => i !== cardIndex);
+  const won     = newHand.length === 0;
+
+  const newHands = { ...state.hands, [aiId]: newHand };
+  const players  = state.players.map(p =>
+    p.id === aiId ? { ...p, cardCount: newHand.length } : p
+  );
+
+  const log = addLog(state.log,
+    `${aiName} jugó una carta boca abajo y dijo ${cardLogName(claimedCard)}.`
+  );
+
+  await db.collection('rooms').doc(currentRoomId).update({
+    players, hands: newHands,
+    lastPlayerId: aiId, lastActualCard: actualCard, lastClaimedCard: claimedCard,
+    prevTopColor: state.topColor, prevTopValue: state.topValue,
+    challengeOpen: true, challengeBelieves: [],
+    unoCallRequired: newHand.length === 1
+      ? { playerId: aiId, playerName: aiName }
+      : firebase.firestore.FieldValue.delete(),
+    log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+// ---- Draw and pass ----
+
+async function aiDrawAndPass(state, aiId, aiName) {
+  const { drawn, newDrawPile } = takeCards(state.drawPile, 1);
+  const hand     = [...(state.hands?.[aiId] || []), ...drawn];
+  const newHands = { ...state.hands, [aiId]: hand };
+  const players  = state.players.map(p =>
+    p.id === aiId ? { ...p, cardCount: hand.length } : p
+  );
+
+  await db.collection('rooms').doc(currentRoomId).update({
+    hands: newHands, drawPile: newDrawPile, players,
+    currentPlayerIndex: nextPlayerIndex(state),
+    log: addLog(state.log, `${aiName} robó una carta y pasó.`),
+    lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+// ---- Challenge / Believe ----
+
+async function aiChallengeOrBelieve(state, aiPlayer) {
+  const aiId   = aiPlayer.id;
+  const aiName = aiPlayer.name;
+  const lp     = state.players.find(p => p.id === state.lastPlayerId);
+  const lpCards = lp?.cardCount ?? 7;
+
+  let challengeProb = 0.30;
+  if (lpCards <= 2) challengeProb = 0.50;
+  if (lpCards === 1) challengeProb = 0.65;
+  if (state.lastClaimedCard?.value === 'wild4') challengeProb += 0.15;
+
+  if (Math.random() < challengeProb) {
+    await aiExecuteChallenge(state, aiId, aiName);
+  } else {
+    await aiExecuteBelieve(state, aiId, aiName);
+  }
+}
+
+async function aiExecuteChallenge(state, aiId, aiName) {
+  const actual  = state.lastActualCard;
+  const claimed = state.lastClaimedCard;
+  const liar    = state.players.find(p => p.id === state.lastPlayerId);
+  const isLie   = actual.value !== claimed.value ||
+    (actual.color !== 'black' && actual.color !== claimed.color);
+
+  let { hands, players, drawPile } = state;
+  let log = state.log;
+
+  if (isLie) {
+    const { drawn, newDrawPile } = takeCards(drawPile, 1);
+    hands   = { ...hands, [state.lastPlayerId]: [...(hands[state.lastPlayerId] || []), actual, ...drawn] };
+    players = players.map(p =>
+      p.id === state.lastPlayerId ? { ...p, cardCount: hands[p.id].length } : p
+    );
+    log = addLog(log,
+      `🚨 ¡${aiName} descubrió a ${liar?.name}! Mintió (era ${cardLogName(actual)}). ${liar?.name} recuperó la carta y robó ${drawn.length} más.`
+    );
+    await db.collection('rooms').doc(currentRoomId).update({
+      hands, players, drawPile: newDrawPile,
+      topColor: state.prevTopColor, topValue: state.prevTopValue,
+      challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
+      lastActualCard: null, lastClaimedCard: null,
+      currentPlayerIndex: nextPlayerIndex(state),
+      log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    return;
+  }
+
+  log = addLog(log,
+    `✓ ${aiName} acusó a ${liar?.name}, pero ${liar?.name} dijo la Verdad (${cardLogName(actual)}). ${aiName} roba 1.`
+  );
+  const lastPlayerWon = (hands?.[state.lastPlayerId] || []).length === 0;
+
+  if (lastPlayerWon) {
+    const { drawn, newDrawPile } = takeCards(drawPile, 1);
+    const newHands   = { ...hands, [aiId]: [...(hands[aiId] || []), ...drawn] };
+    const newPlayers = players.map(p =>
+      p.id === aiId ? { ...p, cardCount: newHands[p.id].length } : p
+    );
+    await db.collection('rooms').doc(currentRoomId).update({
+      hands: newHands, players: newPlayers, drawPile: newDrawPile,
+      status: 'ended', winner: state.lastPlayerId, winnerName: liar?.name,
+      topColor: claimed.color, topValue: claimed.value,
+      challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
+      lastActualCard: null, lastClaimedCard: null,
+      log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } else if (claimed.value === '0') {
+    const { drawn, newDrawPile } = takeCards(drawPile, 1);
+    const advanced = applyEffectsAndAdvance({ ...state, hands, players, drawPile: newDrawPile });
+    const postHands   = { ...advanced.changes.hands, [aiId]: [...(advanced.changes.hands[aiId] || []), ...drawn] };
+    const postPlayers = advanced.changes.players.map(p =>
+      p.id === aiId ? { ...p, cardCount: postHands[p.id].length } : p
+    );
+    log = addLog(log, advanced.logExtra);
+    await db.collection('rooms').doc(currentRoomId).update({
+      ...advanced.changes, hands: postHands, players: postPlayers,
+      challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
+      lastActualCard: null, lastClaimedCard: null,
+      log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } else if (claimed.value === '7') {
+    const advanced = applyEffectsAndAdvance({ ...state, hands, players, drawPile });
+    log = addLog(log, advanced.logExtra);
+    log = addLog(log, `${aiName} robará 1 tras el intercambio de manos.`);
+    await db.collection('rooms').doc(currentRoomId).update({
+      ...advanced.changes, pendingPenaltyDraw: { playerId: aiId, count: 1 },
+      challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
+      lastActualCard: null, lastClaimedCard: null,
+      log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } else {
+    const { drawn, newDrawPile } = takeCards(drawPile, 1);
+    hands   = { ...hands, [aiId]: [...(hands[aiId] || []), ...drawn] };
+    players = players.map(p =>
+      p.id === aiId ? { ...p, cardCount: hands[p.id].length } : p
+    );
+    log = addLog(log, `${aiName} roba ${drawn.length}.`);
+    const advanced = applyEffectsAndAdvance({ ...state, hands, players, drawPile: newDrawPile });
+    log = addLog(log, advanced.logExtra);
+    await db.collection('rooms').doc(currentRoomId).update({
+      ...advanced.changes,
+      challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
+      lastActualCard: null, lastClaimedCard: null,
+      log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }
+}
+
+async function aiExecuteBelieve(state, aiId, aiName) {
+  const believes = state.challengeBelieves || [];
+  if (believes.includes(aiId)) return;
+
+  const newBelieves = [...believes, aiId];
+  const lp          = state.players.find(p => p.id === state.lastPlayerId);
+  const eligible    = state.players.filter(p => p.id !== state.lastPlayerId && !p.disconnected);
+  const allVoted    = eligible.every(p => newBelieves.includes(p.id));
+
+  let log = addLog(state.log, `${aiName} confía en ${lp?.name}.`);
+
+  if (!allVoted) {
+    await db.collection('rooms').doc(currentRoomId).update({
+      challengeBelieves: newBelieves, log,
+      lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    return;
+  }
+
+  const lastPlayerWon = (state.hands?.[state.lastPlayerId] || []).length === 0;
+  if (lastPlayerWon) {
+    await db.collection('rooms').doc(currentRoomId).update({
+      status: 'ended', winner: state.lastPlayerId, winnerName: lp?.name,
+      topColor: state.lastClaimedCard.color, topValue: state.lastClaimedCard.value,
+      challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
+      lastActualCard: null, lastClaimedCard: null,
+      log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } else {
+    const advanced = applyEffectsAndAdvance(state);
+    log = addLog(log, advanced.logExtra);
+    await db.collection('rooms').doc(currentRoomId).update({
+      ...advanced.changes,
+      challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
+      lastActualCard: null, lastClaimedCard: null,
+      log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }
+}
+
+// ---- Wild card challenge ----
+
+async function aiSubmitWildCard(state, aiPlayer) {
+  const aiId = aiPlayer.id;
+  const wc   = state.wildChallenge;
+  if (!wc || wc.phase !== 'collecting' || !wc.playersNeeded.includes(aiId)) return;
+
+  const hand = [...(state.hands?.[aiId] || [])];
+  let cardIdx = hand.findIndex(c => c.color === wc.chosenColor && c.color !== 'black');
+  if (cardIdx === -1) cardIdx = hand.findIndex(c => c.color !== 'black');
+  if (cardIdx === -1) return;
+
+  const card    = hand[cardIdx];
+  const newHand = hand.filter((_, i) => i !== cardIdx);
+  const newHands   = { ...state.hands, [aiId]: newHand };
+  const players    = state.players.map(p =>
+    p.id === aiId ? { ...p, cardCount: newHand.length } : p
+  );
+  const newSubmitted   = { ...wc.submittedCards, [aiId]: card };
+  const newPlayersNeeded = wc.playersNeeded.filter(id => id !== aiId);
+  const allIn = newPlayersNeeded.length === 0;
+
+  const newWC = { ...wc, submittedCards: newSubmitted, playersNeeded: newPlayersNeeded,
+    phase: allIn ? 'accusing' : 'collecting' };
+
+  const updates = { hands: newHands, players, wildChallenge: newWC,
+    lastActivity: firebase.firestore.FieldValue.serverTimestamp() };
+  if (allIn) updates.log = addLog(state.log, `Todos pusieron su carta. ¡${wc.chooserName} elige a quién acusar!`);
+  await db.collection('rooms').doc(currentRoomId).update(updates);
+}
+
+async function aiAccuseWildPlayer(state, aiPlayer) {
+  const wc = state.wildChallenge;
+  if (!wc || wc.phase !== 'accusing' || wc.chooserId !== aiPlayer.id) return;
+
+  const pool = wc.accusePool || [];
+  if (!pool.length) return;
+  const targetId   = pool[Math.floor(Math.random() * pool.length)];
+  const targetName = state.players.find(p => p.id === targetId)?.name || '?';
+  const submitted  = wc.submittedCards[targetId];
+  if (!submitted) return;
+
+  const hasColor   = submitted.color === wc.chosenColor;
+  let { hands, players, drawPile } = state;
+  let log = state.log;
+
+  const newAccusePool = wc.accusePool.filter(id => id !== targetId);
+  const newFlipped = { ...(wc.flippedCards || {}),
+    [targetId]: { card: submitted, result: hasColor ? 'correct' : 'wrong' } };
+
+  if (!hasColor) {
+    const { drawn, newDrawPile } = takeCards(drawPile, 1);
+    drawPile = newDrawPile;
+    hands    = { ...hands, [targetId]: [...(hands[targetId] || []), submitted, ...drawn] };
+    players  = players.map(p => p.id === targetId ? { ...p, cardCount: hands[p.id].length } : p);
+    const newSub = { ...wc.submittedCards };
+    delete newSub[targetId];
+    log = addLog(log,
+      `${aiPlayer.name} acusa a ${targetName} - ¡Mintió! No tiene ${COLOR_NAME[wc.chosenColor]}. Devuelve la carta y roba 1.`
+    );
+    await db.collection('rooms').doc(currentRoomId).update({
+      hands, players, drawPile,
+      wildChallenge: { ...wc, submittedCards: newSub, accusePool: newAccusePool,
+        accusedWrong: [...wc.accusedWrong, targetId], flippedCards: newFlipped,
+        phase: newAccusePool.length === 0 ? 'choosing' : 'accusing' },
+      log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } else {
+    const discardQueue = newAccusePool;
+    let finalFlipped   = { ...newFlipped };
+    const newSub       = { ...wc.submittedCards };
+    delete newSub[targetId];
+    const discardedDescs = [];
+    for (const rid of discardQueue) {
+      const rCard = wc.submittedCards[rid];
+      if (rCard) {
+        finalFlipped[rid] = { card: rCard, result: 'discarded' };
+        delete newSub[rid];
+        const rName = state.players.find(p => p.id === rid)?.name || '?';
+        discardedDescs.push(`${rName}: ${COLOR_NAME[rCard.color]} ${VALUE_LABEL[rCard.value]}`);
+      }
+    }
+    const discardNote = discardedDescs.length ? ` Cartas descartadas — ${discardedDescs.join(', ')}.` : '';
+    log = addLog(log,
+      `✅ ${aiPlayer.name} acusa a ${targetName} — ¡sí tenía ${COLOR_NAME[wc.chosenColor]}! Actividad terminada.${discardNote}`
+    );
+    await db.collection('rooms').doc(currentRoomId).update({
+      wildChallenge: { ...wc, accusePool: newAccusePool, foundPlayerId: targetId,
+        submittedCards: newSub, discardQueue, flippedCards: finalFlipped,
+        phase: discardQueue.length > 0 ? 'resolving' : 'choosing' },
+      log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }
+}
+
+async function aiDiscardWildResolved(state, aiPlayer) {
+  const wc = state.wildChallenge;
+  if (!wc || wc.phase !== 'resolving' || wc.chooserId !== aiPlayer.id) return;
+  const log = addLog(state.log, `Las cartas restantes son descartadas.`);
+  await db.collection('rooms').doc(currentRoomId).update({
+    wildChallenge: { ...wc, discardQueue: [], phase: 'choosing' },
+    log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+async function aiFinalizeWildColor(state, aiPlayer) {
+  const wc = state.wildChallenge;
+  if (!wc || wc.phase !== 'choosing' || wc.chooserId !== aiPlayer.id) return;
+  const hand  = state.hands?.[aiPlayer.id] || [];
+  const color = aiChooseColor(hand);
+  const log   = addLog(state.log, `${aiPlayer.name} elige el color final: ${COLOR_NAME[color]}.`);
+  await db.collection('rooms').doc(currentRoomId).update({
+    topColor: color, topValue: 'wild',
+    currentPlayerIndex: wc.nextPlayerIndex,
+    wildChallenge: firebase.firestore.FieldValue.delete(),
+    log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+// ---- Seven swap (liar 7 played by AI) ----
+
+async function aiExecuteSevenSwap(state, aiPlayer) {
+  const aiId   = aiPlayer.id;
+  const aiName = aiPlayer.name;
+  const pending = state.sevenSwapPending;
+  if (!pending || pending.chooserId !== aiId) return;
+
+  const target = aiPickSwapTarget(state, aiId);
+  if (!target) return;
+
+  let { hands, players, drawPile } = state;
+  const chooserHand = hands[aiId]       || [];
+  const targetHand  = hands[target.id]  || [];
+
+  hands   = { ...hands, [aiId]: targetHand, [target.id]: chooserHand };
+  players = players.map(p => ({ ...p, cardCount: (hands[p.id] || []).length }));
+  let log = addLog(state.log, `${aiName} intercambió manos con ${target.name}.`);
+
+  const update = {
+    hands, players,
+    currentPlayerIndex: pending.nextPlayerIndex,
+    sevenSwapPending: firebase.firestore.FieldValue.delete(),
+    log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  const penaltyDraw = state.pendingPenaltyDraw;
+  if (penaltyDraw) {
+    const { drawn, newDrawPile } = takeCards(drawPile, penaltyDraw.count);
+    const pid = penaltyDraw.playerId;
+    update.hands   = { ...update.hands, [pid]: [...(update.hands[pid] || []), ...drawn] };
+    update.players = update.players.map(p =>
+      p.id === pid ? { ...p, cardCount: update.hands[p.id].length } : p
+    );
+    update.drawPile = newDrawPile;
+    update.pendingPenaltyDraw = firebase.firestore.FieldValue.delete();
+    const penaltyName = state.players.find(p => p.id === pid)?.name || '?';
+    log = addLog(log, `${penaltyName} roba ${penaltyDraw.count} (penalización).`);
+    update.log = log;
+  }
+
+  await db.collection('rooms').doc(currentRoomId).update(update);
+}
+
+// ---- UNO call ----
+
+async function aiCallUno(state, aiPlayer) {
+  const log = addLog(state.log, `${aiPlayer.name} grita ¡UNO! 🎴`);
+  await db.collection('rooms').doc(currentRoomId).update({
+    unoCallRequired: firebase.firestore.FieldValue.delete(),
+    log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
 
 // ============================================================
 // VOICE CHAT (WebRTC mesh, Firebase RTDB signaling)
