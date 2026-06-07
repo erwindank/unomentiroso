@@ -187,6 +187,7 @@ let claimValue = null;
 let unoAlertTimeout = null;
 let currentUnoCallRequired = null;
 let unoCallClearPending = false;
+let unoCallInProgress = false;
 let sevenSwapMode = null; // 'normal' | 'liar' | null
 let drawnCardState = null; // { cardIdx, canPlay } — set after drawing, cleared when turn ends
 
@@ -1049,8 +1050,10 @@ function renderUnoCallOverlay(state) {
   const req = state.unoCallRequired;
 
   if (!req || state.challengeOpen) {
-    overlay.classList.add('hidden');
-    currentUnoCallRequired = null;
+    if (!unoCallInProgress) {
+      overlay.classList.add('hidden');
+      currentUnoCallRequired = null;
+    }
     return;
   }
 
@@ -1084,49 +1087,56 @@ function renderUnoCallOverlay(state) {
 
 async function handleUnoCallBtn() {
   const req = currentUnoCallRequired;
-  if (!req || !roomState) return;
+  if (!req || !roomState || unoCallInProgress) return;
 
+  unoCallInProgress = true;
   document.getElementById('uno-call-overlay').classList.add('hidden');
   currentUnoCallRequired = null;
 
-  if (req.playerId === localUid) {
-    const log = addLog(roomState.log, `${localName} grita ¡UNO! 🎴`);
-    await db.collection('rooms').doc(currentRoomId).update({
-      unoCallRequired: firebase.firestore.FieldValue.delete(),
-      log,
-      lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-    });
-  } else {
+  try {
     const roomRef = db.collection('rooms').doc(currentRoomId);
     await db.runTransaction(async (transaction) => {
       const doc = await transaction.get(roomRef);
       const state = doc.data();
 
-      // Bail out if the player already safely shouted UNO (unoCallRequired was deleted)
+      // Bail out if unoCallRequired was already resolved or changed to a different player
       if (!state.unoCallRequired || state.unoCallRequired.playerId !== req.playerId) return;
 
       // Bail out if they no longer have exactly 1 card
       const reqPlayer = state.players.find(p => p.id === req.playerId);
       if (!reqPlayer || reqPlayer.cardCount !== 1) return;
 
-      let { hands, players, drawPile } = state;
-      const { drawn, newDrawPile } = takeCards(drawPile, 2);
-      hands   = { ...hands, [req.playerId]: [...(hands[req.playerId] || []), ...drawn] };
-      players = players.map(p =>
-        p.id === req.playerId ? { ...p, cardCount: hands[p.id].length } : p
-      );
-      const log = addLog(state.log,
-        `🚨 ${localName} le gritó UNO a ${req.playerName}. ${req.playerName} roba 2 cartas.`
-      );
-      transaction.update(roomRef, {
-        hands,
-        players,
-        drawPile: newDrawPile,
-        unoCallRequired: firebase.firestore.FieldValue.delete(),
-        log,
-        lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-      });
+      if (req.playerId === localUid) {
+        // Saving myself — just clear the flag
+        const log = addLog(state.log, `${localName} grita ¡UNO! 🎴`);
+        transaction.update(roomRef, {
+          unoCallRequired: firebase.firestore.FieldValue.delete(),
+          log,
+          lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      } else {
+        // Catching another player
+        let { hands, players, drawPile } = state;
+        const { drawn, newDrawPile } = takeCards(drawPile, 2);
+        hands   = { ...hands, [req.playerId]: [...(hands[req.playerId] || []), ...drawn] };
+        players = players.map(p =>
+          p.id === req.playerId ? { ...p, cardCount: hands[p.id].length } : p
+        );
+        const log = addLog(state.log,
+          `🚨 ${localName} le gritó UNO a ${req.playerName}. ${req.playerName} roba 2 cartas.`
+        );
+        transaction.update(roomRef, {
+          hands,
+          players,
+          drawPile: newDrawPile,
+          unoCallRequired: firebase.firestore.FieldValue.delete(),
+          log,
+          lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
     });
+  } finally {
+    unoCallInProgress = false;
   }
 }
 
@@ -4239,10 +4249,17 @@ async function aiExecuteSevenSwap(state, aiPlayer) {
 // ---- UNO call ----
 
 async function aiCallUno(state, aiPlayer) {
-  const log = addLog(state.log, `${aiPlayer.name} grita ¡UNO! 🎴`);
-  await db.collection('rooms').doc(currentRoomId).update({
-    unoCallRequired: firebase.firestore.FieldValue.delete(),
-    log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  const roomRef = db.collection('rooms').doc(currentRoomId);
+  await db.runTransaction(async (transaction) => {
+    const doc = await transaction.get(roomRef);
+    const fresh = doc.data();
+    // Bail if unoCallRequired was already resolved or stolen by another player's card
+    if (!fresh.unoCallRequired || fresh.unoCallRequired.playerId !== aiPlayer.id) return;
+    const log = addLog(fresh.log, `${aiPlayer.name} grita ¡UNO! 🎴`);
+    transaction.update(roomRef, {
+      unoCallRequired: firebase.firestore.FieldValue.delete(),
+      log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    });
   });
 }
 
