@@ -650,6 +650,7 @@ function setupPresence(roomId) {
 
     for (const player of roomState.players) {
       if (player.id === localUid) continue;
+      if (player.isAI) continue;
 
       if (!present[player.id]) {
         if (!disconnectTimers[player.id]) {
