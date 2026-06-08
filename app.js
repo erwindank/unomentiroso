@@ -4040,19 +4040,19 @@ async function aiExecuteChallenge(state, aiId, aiName) {
 
   if (isLie) {
     const { drawn, newDrawPile } = takeCards(drawPile, 1);
-    hands   = { ...hands, [state.lastPlayerId]: [...(hands[state.lastPlayerId] || []), actual, ...drawn] };
+    hands   = { ...hands, [freshState.lastPlayerId]: [...(hands[freshState.lastPlayerId] || []), actual, ...drawn] };
     players = players.map(p =>
-      p.id === state.lastPlayerId ? { ...p, cardCount: hands[p.id].length } : p
+      p.id === freshState.lastPlayerId ? { ...p, cardCount: hands[p.id].length } : p
     );
     log = addLog(log,
       `🚨 ¡${aiName} descubrió a ${liar?.name}! Mintió (era ${cardLogName(actual)}). ${liar?.name} recuperó la carta y robó ${drawn.length} más.`
     );
-    await db.collection('rooms').doc(currentRoomId).update({
+    tx.update(roomRef, {
       hands, players, drawPile: newDrawPile,
-      topColor: state.prevTopColor, topValue: state.prevTopValue,
+      topColor: freshState.prevTopColor, topValue: freshState.prevTopValue,
       challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
       lastActualCard: null, lastClaimedCard: null,
-      currentPlayerIndex: nextPlayerIndex(state),
+      currentPlayerIndex: nextPlayerIndex(freshState),
       log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
     });
     return;
@@ -4061,7 +4061,7 @@ async function aiExecuteChallenge(state, aiId, aiName) {
   log = addLog(log,
     `✓ ${aiName} acusó a ${liar?.name}, pero ${liar?.name} dijo la Verdad (${actual?.value === 'wild' ? 'Comodín' : actual?.value === 'wild4' ? 'Comodín +4' : cardLogName(actual)}). ${aiName} roba 1.`
   );
-  const lastPlayerWon = (hands?.[state.lastPlayerId] || []).length === 0;
+  const lastPlayerWon = (hands?.[freshState.lastPlayerId] || []).length === 0;
 
   if (lastPlayerWon) {
     const { drawn, newDrawPile } = takeCards(drawPile, 1);
@@ -4069,9 +4069,9 @@ async function aiExecuteChallenge(state, aiId, aiName) {
     const newPlayers = players.map(p =>
       p.id === aiId ? { ...p, cardCount: newHands[p.id].length } : p
     );
-    await db.collection('rooms').doc(currentRoomId).update({
+    tx.update(roomRef, {
       hands: newHands, players: newPlayers, drawPile: newDrawPile,
-      status: 'ended', winner: state.lastPlayerId, winnerName: liar?.name,
+      status: 'ended', winner: freshState.lastPlayerId, winnerName: liar?.name,
       topColor: claimed.color, topValue: claimed.value,
       challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
       lastActualCard: null, lastClaimedCard: null,
@@ -4079,23 +4079,23 @@ async function aiExecuteChallenge(state, aiId, aiName) {
     });
   } else if (claimed.value === '0') {
     const { drawn, newDrawPile } = takeCards(drawPile, 1);
-    const advanced = applyEffectsAndAdvance({ ...state, hands, players, drawPile: newDrawPile });
+    const advanced = applyEffectsAndAdvance({ ...freshState, hands, players, drawPile: newDrawPile });
     const postHands   = { ...advanced.changes.hands, [aiId]: [...(advanced.changes.hands[aiId] || []), ...drawn] };
     const postPlayers = advanced.changes.players.map(p =>
       p.id === aiId ? { ...p, cardCount: postHands[p.id].length } : p
     );
     log = addLog(log, advanced.logExtra);
-    await db.collection('rooms').doc(currentRoomId).update({
+    tx.update(roomRef, {
       ...advanced.changes, hands: postHands, players: postPlayers,
       challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
       lastActualCard: null, lastClaimedCard: null,
       log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
     });
   } else if (claimed.value === '7') {
-    const advanced = applyEffectsAndAdvance({ ...state, hands, players, drawPile });
+    const advanced = applyEffectsAndAdvance({ ...freshState, hands, players, drawPile });
     log = addLog(log, advanced.logExtra);
     log = addLog(log, `${aiName} robará 1 tras el intercambio de manos.`);
-    await db.collection('rooms').doc(currentRoomId).update({
+    tx.update(roomRef, {
       ...advanced.changes, pendingPenaltyDraw: { playerId: aiId, count: 1 },
       challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
       lastActualCard: null, lastClaimedCard: null,
@@ -4108,15 +4108,16 @@ async function aiExecuteChallenge(state, aiId, aiName) {
       p.id === aiId ? { ...p, cardCount: hands[p.id].length } : p
     );
     log = addLog(log, `${aiName} roba ${drawn.length}.`);
-    const advanced = applyEffectsAndAdvance({ ...state, hands, players, drawPile: newDrawPile });
+    const advanced = applyEffectsAndAdvance({ ...freshState, hands, players, drawPile: newDrawPile });
     log = addLog(log, advanced.logExtra);
-    await db.collection('rooms').doc(currentRoomId).update({
+    tx.update(roomRef, {
       ...advanced.changes,
       challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
       lastActualCard: null, lastClaimedCard: null,
       log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
     });
   }
+  });
 }
 
 async function aiExecuteBelieve(state, aiId, aiName) {
