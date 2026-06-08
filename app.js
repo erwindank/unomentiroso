@@ -3058,59 +3058,66 @@ async function handleChallenge() {
 // ============================================================
 
 async function handleBelieve() {
-  const state = roomState;
-  if (!state?.challengeOpen) return;
+  if (!roomState?.challengeOpen) return;
 
-  const believes = state.challengeBelieves || [];
-  if (believes.includes(localUid)) return; // already voted
+  const roomRef = db.collection('rooms').doc(currentRoomId);
+  await db.runTransaction(async tx => {
+    const snap = await tx.get(roomRef);
+    if (!snap.exists) return;
+    const state = snap.data();
+    if (!state.challengeOpen) return;
 
-  const newBelieves = [...believes, localUid];
-  const lp = state.players.find(p => p.id === state.lastPlayerId);
+    const believes = state.challengeBelieves || [];
+    if (believes.includes(localUid)) return; // already voted
 
-  // Eligible voters = connected players except the one who played the card
-  const eligible = state.players.filter(p => p.id !== state.lastPlayerId && !p.disconnected);
-  const allVoted = eligible.every(p => newBelieves.includes(p.id));
+    const newBelieves = [...believes, localUid];
+    const lp = state.players.find(p => p.id === state.lastPlayerId);
 
-  let log = addLog(state.log, `${localName} confía en ${lp?.name}.`);
+    // Eligible voters = connected players except the one who played the card
+    const eligible = state.players.filter(p => p.id !== state.lastPlayerId && !p.disconnected);
+    const allVoted = eligible.every(p => newBelieves.includes(p.id));
 
-  if (allVoted) {
-    const lastPlayerWon = (state.hands?.[state.lastPlayerId] || []).length === 0;
-    if (lastPlayerWon) {
-      await db.collection('rooms').doc(currentRoomId).update({
-        status: 'ended',
-        winner: state.lastPlayerId,
-        winnerName: lp?.name,
-        topColor: state.lastClaimedCard.color,
-        topValue: state.lastClaimedCard.value,
-        challengeOpen: false,
-        challengeBelieves: firebase.firestore.FieldValue.delete(),
-        lastActualCard: null,
-        lastClaimedCard: null,
-        log,
-        lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-      });
+    let log = addLog(state.log, `${localName} confía en ${lp?.name}.`);
+
+    if (allVoted) {
+      const lastPlayerWon = (state.hands?.[state.lastPlayerId] || []).length === 0;
+      if (lastPlayerWon) {
+        tx.update(roomRef, {
+          status: 'ended',
+          winner: state.lastPlayerId,
+          winnerName: lp?.name,
+          topColor: state.lastClaimedCard.color,
+          topValue: state.lastClaimedCard.value,
+          challengeOpen: false,
+          challengeBelieves: firebase.firestore.FieldValue.delete(),
+          lastActualCard: null,
+          lastClaimedCard: null,
+          log,
+          lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      } else {
+        // Everyone has voted "Lo creo" — resolve the challenge
+        const advanced = applyEffectsAndAdvance(state);
+        log = addLog(log, advanced.logExtra);
+        tx.update(roomRef, {
+          ...advanced.changes,
+          challengeOpen: false,
+          challengeBelieves: firebase.firestore.FieldValue.delete(),
+          lastActualCard: null,
+          lastClaimedCard: null,
+          log,
+          lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
     } else {
-      // Everyone has voted "Lo creo" — resolve the challenge
-      const advanced = applyEffectsAndAdvance(state);
-      log = addLog(log, advanced.logExtra);
-      await db.collection('rooms').doc(currentRoomId).update({
-        ...advanced.changes,
-        challengeOpen: false,
-        challengeBelieves: firebase.firestore.FieldValue.delete(),
-        lastActualCard: null,
-        lastClaimedCard: null,
+      // Still waiting for other players
+      tx.update(roomRef, {
+        challengeBelieves: newBelieves,
         log,
         lastActivity: firebase.firestore.FieldValue.serverTimestamp()
       });
     }
-  } else {
-    // Still waiting for other players
-    await db.collection('rooms').doc(currentRoomId).update({
-      challengeBelieves: newBelieves,
-      log,
-      lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-    });
-  }
+  });
 }
 
 // ============================================================
@@ -4100,43 +4107,51 @@ async function aiExecuteChallenge(state, aiId, aiName) {
 }
 
 async function aiExecuteBelieve(state, aiId, aiName) {
-  const believes = state.challengeBelieves || [];
-  if (believes.includes(aiId)) return;
+  const roomRef = db.collection('rooms').doc(currentRoomId);
+  await db.runTransaction(async tx => {
+    const snap = await tx.get(roomRef);
+    if (!snap.exists) return;
+    const freshState = snap.data();
+    if (!freshState.challengeOpen) return;
 
-  const newBelieves = [...believes, aiId];
-  const lp          = state.players.find(p => p.id === state.lastPlayerId);
-  const eligible    = state.players.filter(p => p.id !== state.lastPlayerId && !p.disconnected);
-  const allVoted    = eligible.every(p => newBelieves.includes(p.id));
+    const believes = freshState.challengeBelieves || [];
+    if (believes.includes(aiId)) return;
 
-  let log = addLog(state.log, `${aiName} confía en ${lp?.name}.`);
+    const newBelieves = [...believes, aiId];
+    const lp       = freshState.players.find(p => p.id === freshState.lastPlayerId);
+    const eligible = freshState.players.filter(p => p.id !== freshState.lastPlayerId && !p.disconnected);
+    const allVoted = eligible.every(p => newBelieves.includes(p.id));
 
-  if (!allVoted) {
-    await db.collection('rooms').doc(currentRoomId).update({
-      challengeBelieves: newBelieves, log,
-      lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    return;
-  }
+    let log = addLog(freshState.log, `${aiName} confía en ${lp?.name}.`);
 
-  const lastPlayerWon = (state.hands?.[state.lastPlayerId] || []).length === 0;
-  if (lastPlayerWon) {
-    await db.collection('rooms').doc(currentRoomId).update({
-      status: 'ended', winner: state.lastPlayerId, winnerName: lp?.name,
-      topColor: state.lastClaimedCard.color, topValue: state.lastClaimedCard.value,
-      challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
-      lastActualCard: null, lastClaimedCard: null,
-      log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-    });
-  } else {
-    const advanced = applyEffectsAndAdvance(state);
-    log = addLog(log, advanced.logExtra);
-    await db.collection('rooms').doc(currentRoomId).update({
-      ...advanced.changes,
-      challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
-      lastActualCard: null, lastClaimedCard: null,
-      log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-    });
-  }
+    if (!allVoted) {
+      tx.update(roomRef, {
+        challengeBelieves: newBelieves, log,
+        lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      return;
+    }
+
+    const lastPlayerWon = (freshState.hands?.[freshState.lastPlayerId] || []).length === 0;
+    if (lastPlayerWon) {
+      tx.update(roomRef, {
+        status: 'ended', winner: freshState.lastPlayerId, winnerName: lp?.name,
+        topColor: freshState.lastClaimedCard.color, topValue: freshState.lastClaimedCard.value,
+        challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
+        lastActualCard: null, lastClaimedCard: null,
+        log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    } else {
+      const advanced = applyEffectsAndAdvance(freshState);
+      log = addLog(log, advanced.logExtra);
+      tx.update(roomRef, {
+        ...advanced.changes,
+        challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
+        lastActualCard: null, lastClaimedCard: null,
+        log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+  });
 }
 
 // ---- Wild card challenge ----
