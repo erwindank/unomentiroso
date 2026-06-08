@@ -1263,18 +1263,31 @@ button, .card, .color-btn, .value-btn, .btn-copy, .draw-pile .card-back {
 .btn { min-height: 44px; }
 
 /* Prevent iOS auto-zoom on input focus (triggers when font-size < 16px) */
+/* Also: on mobile always allow landing to scroll and respect safe-area (home indicator) */
 @media (max-width: 768px) {
   input[type=text] { font-size: 16px; }
-}
-
-/* Landing screen: allow scrolling on short phones */
-@media (max-height: 700px) {
   #screen-landing {
     overflow-y: auto;
     justify-content: flex-start;
-    padding: 1.5rem 0;
+    padding: 1.5rem 0 max(1.5rem, env(safe-area-inset-bottom));
   }
   .landing-card { max-height: none; }
+}
+
+/* Landing screen: allow scrolling on short phones */
+@media (max-height: 800px) {
+  #screen-landing {
+    overflow-y: auto;
+    justify-content: flex-start;
+    padding: 1.5rem 0 max(1.5rem, env(safe-area-inset-bottom));
+  }
+  .landing-card { max-height: none; }
+}
+
+/* Mobile topbar: allow buttons to wrap so SALIR and music don't overlap others */
+@media (max-width: 640px) {
+  .game-topbar { flex-wrap: wrap; padding: .3rem .5rem; }
+  .game-topbar-actions { flex: 1 1 100%; flex-wrap: wrap; justify-content: flex-end; }
 }
 
 /* Game layout: tighten up on short screens */
