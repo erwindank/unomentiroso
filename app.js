@@ -3760,12 +3760,24 @@ function maybeRunAI(state) {
 
   const unoReqs = getUnoQueue(state.unoCallRequired);
   if (unoReqs.length > 0) {
-    const aiReq = unoReqs.find(r => state.players.find(p => p.id === r.playerId && p.isAI));
-    if (aiReq) {
-      const aiOwner = state.players.find(p => p.id === aiReq.playerId);
+    // Bot yells for itself with ~85% reliability (occasionally forgets)
+    const selfReq = unoReqs.find(r => state.players.find(p => p.id === r.playerId && p.isAI));
+    if (selfReq && Math.random() < 0.85) {
+      const aiOwner = state.players.find(p => p.id === selfReq.playerId);
       scheduleAiAction(() => aiCallUno(state, aiOwner));
       return;
     }
+    // A bot may catch any player who forgot — including a bot that just forgot above
+    const catchTarget = selfReq ?? unoReqs.find(r => !state.players.find(p => p.id === r.playerId)?.isAI);
+    if (catchTarget) {
+      const eligibleCatchers = state.players.filter(p => p.isAI && p.id !== catchTarget.playerId && !p.disconnected);
+      if (eligibleCatchers.length > 0 && Math.random() < 0.65) {
+        const catcher = eligibleCatchers[Math.floor(Math.random() * eligibleCatchers.length)];
+        scheduleAiAction(() => aiCatchUno(state, catcher, catchTarget));
+        return;
+      }
+    }
+    // Nobody acted — fall through so the current player can still take their turn
   }
 
   const currentPlayer = state.players[state.currentPlayerIndex];
@@ -4305,6 +4317,38 @@ async function aiCallUno(state, aiPlayer) {
     transaction.update(roomRef, {
       unoCallRequired: newQueue.length > 0 ? newQueue : firebase.firestore.FieldValue.delete(),
       log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  });
+}
+
+// ---- UNO catch (bot catches a player who forgot to yell UNO) ----
+
+async function aiCatchUno(state, aiCatcher, targetReq) {
+  const roomRef = db.collection('rooms').doc(currentRoomId);
+  await db.runTransaction(async (transaction) => {
+    const doc = await transaction.get(roomRef);
+    const fresh = doc.data();
+    const freshQueue = getUnoQueue(fresh.unoCallRequired);
+    if (!freshQueue.some(r => r.playerId === targetReq.playerId)) return;
+    const target = fresh.players.find(p => p.id === targetReq.playerId);
+    if (!target || target.cardCount !== 1) return;
+
+    const { drawn, newDrawPile } = takeCards(fresh.drawPile, 2);
+    const newHands   = { ...fresh.hands, [targetReq.playerId]: [...(fresh.hands[targetReq.playerId] || []), ...drawn] };
+    const newPlayers = fresh.players.map(p =>
+      p.id === targetReq.playerId ? { ...p, cardCount: newHands[p.id].length } : p
+    );
+    const newQueue = freshQueue.filter(r => r.playerId !== targetReq.playerId);
+    const log = addLog(fresh.log,
+      `🚨 ${aiCatcher.name} le gritó UNO a ${targetReq.playerName}. ${targetReq.playerName} roba 2 cartas.`
+    );
+    transaction.update(roomRef, {
+      hands: newHands,
+      players: newPlayers,
+      drawPile: newDrawPile,
+      unoCallRequired: newQueue.length > 0 ? newQueue : firebase.firestore.FieldValue.delete(),
+      log,
+      lastActivity: firebase.firestore.FieldValue.serverTimestamp()
     });
   });
 }
