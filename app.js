@@ -3884,6 +3884,11 @@ async function aiPlayNormalCard(state, aiId, aiName, actualCard, cardIndex, chos
     return;
   }
 
+  if (actualCard.value === 'wild') {
+    await aiStartWildChallenge(state, aiId, aiName, cardIndex);
+    return;
+  }
+
   const hand    = [...(state.hands?.[aiId] || [])];
   const newHand = hand.filter((_, i) => i !== cardIndex);
   const won     = newHand.length === 0;
@@ -3896,11 +3901,6 @@ async function aiPlayNormalCard(state, aiId, aiName, actualCard, cardIndex, chos
   let players = state.players.map(p =>
     p.id === aiId ? { ...p, cardCount: newHand.length } : p
   );
-
-  if (actualCard.value === 'wild') {
-    topColor = chosenColor || aiChooseColor(hand);
-    logMsgs.push(`${aiName} eligió el color ${COLOR_NAME[topColor]}.`);
-  }
 
   if (actualCard.value === '0') {
     const passedHands = passHands(newHands, state.players, state.direction);
@@ -3922,6 +3922,49 @@ async function aiPlayNormalCard(state, aiId, aiName, actualCard, cardIndex, chos
   if (won) { update.status = 'ended'; update.winner = aiId; update.winnerName = aiName; }
 
   await aiBotWrite(update, logMsgs);
+}
+
+async function aiStartWildChallenge(state, aiId, aiName, cardIndex) {
+  const hand     = [...(state.hands?.[aiId] || [])];
+  const newHand  = hand.filter((_, i) => i !== cardIndex);
+  const newHands = { ...state.hands, [aiId]: newHand };
+  const players  = state.players.map(p =>
+    p.id === aiId ? { ...p, cardCount: newHand.length } : p
+  );
+  const won = newHand.length === 0;
+
+  const chosenColor = aiChooseColor(hand);
+  const others = state.players.filter(p => p.id !== aiId).map(p => p.id);
+
+  const update = {
+    players, hands: newHands,
+    topColor: 'black', topValue: 'wild',
+    challengeOpen: false, lastActualCard: null, lastClaimedCard: null,
+    wildChallenge: {
+      phase: others.length === 0 ? 'choosing' : 'collecting',
+      chooserId: aiId,
+      chooserName: aiName,
+      chosenColor,
+      playersNeeded: others,
+      submittedCards: {},
+      flippedCards: {},
+      accusePool: [...others],
+      accusedWrong: [],
+      foundPlayerId: null,
+      discardQueue: [],
+      nextPlayerIndex: nextPlayerIndex(state),
+    },
+    lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  update.unoCallRequired = (newHand.length === 1 && !won)
+    ? [{ playerId: aiId, playerName: aiName }]
+    : firebase.firestore.FieldValue.delete();
+  if (won) { update.status = 'ended'; update.winner = aiId; update.winnerName = aiName; }
+
+  await aiBotWrite(update, [
+    `${aiName} jugó Comodín y elige ${COLOR_NAME[chosenColor]}. ¡Todos ponen una carta boca abajo!`
+  ]);
 }
 
 async function aiPlayNormalCardWithSwap(state, aiId, aiName, actualCard, cardIndex) {
