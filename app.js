@@ -185,6 +185,7 @@ let selectedActualCard = null;
 let claimColor = null;
 let claimValue = null;
 let unoAlertTimeout = null;
+let unoAlertMessage = null;
 let currentUnoCallRequired = null;
 let unoCallClearPending = false;
 let unoCallInProgress = false;
@@ -1026,9 +1027,12 @@ function renderUnoAlert(state) {
     alertEl.classList.remove('hidden');
     alertEl.innerHTML = `<span>${esc(state.unoAlert)}</span>`;
 
-    if (!unoAlertTimeout) {
+    if (!unoAlertTimeout || unoAlertMessage !== state.unoAlert) {
+      if (unoAlertTimeout) clearTimeout(unoAlertTimeout);
+      unoAlertMessage = state.unoAlert;
       unoAlertTimeout = setTimeout(async () => {
         unoAlertTimeout = null;
+        unoAlertMessage = null;
         if (!roomState || !roomState.unoAlert) return;
         await db.collection('rooms').doc(currentRoomId).update({
           unoAlert: firebase.firestore.FieldValue.delete()
@@ -1042,6 +1046,7 @@ function renderUnoAlert(state) {
       clearTimeout(unoAlertTimeout);
       unoAlertTimeout = null;
     }
+    unoAlertMessage = null;
   }
 }
 
