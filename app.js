@@ -3132,7 +3132,8 @@ function applyEffectsAndAdvance(state) {
   const n = players.length;
   const activeN = players.filter(p => !p.disconnected).length;
 
-  let topColor = claimed.color;
+  const REAL_COLORS_AEA = ['red', 'yellow', 'green', 'blue'];
+  let topColor = REAL_COLORS_AEA.includes(claimed.color) ? claimed.color : REAL_COLORS_AEA[Math.floor(Math.random() * 4)];
   let topValue = claimed.value;
   let logExtra = '';
 
@@ -3807,7 +3808,8 @@ function aiPickSwapTarget(state, aiId) {
 }
 
 function aiBuildBluffClaim(state) {
-  const topColor = state.topColor;
+  const REAL_COLORS = ['red', 'yellow', 'green', 'blue'];
+  const topColor = REAL_COLORS.includes(state.topColor) ? state.topColor : REAL_COLORS[Math.floor(Math.random() * 4)];
   if (Math.random() < 0.35) return { color: topColor, value: 'wild4' };
   const vals = ['skip', 'reverse', 'draw2', '8', '9', state.topValue];
   return { color: topColor, value: vals[Math.floor(Math.random() * vals.length)] };
@@ -3842,7 +3844,7 @@ async function aiTakeTurn(state, aiPlayer) {
   const liarCandidates = liarMatchable.length > 0 ? liarMatchable : liarAny;
   if (liarCandidates.length > 0) {
     const { card, idx } = liarCandidates[Math.floor(Math.random() * liarCandidates.length)];
-    const honestClaim   = { color: card.color, value: card.value };
+    const honestClaim   = { color: card.color === 'black' ? aiChooseColor(hand) : card.color, value: card.value };
     const honestOk      = isClaimPlayable(honestClaim, state);
     const useHonest     = honestOk && Math.random() < 0.55;
     const claimedCard   = useHonest ? honestClaim : aiBuildBluffClaim(state);
@@ -4134,9 +4136,12 @@ async function aiExecuteBelieve(state, aiId, aiName) {
 
     const lastPlayerWon = (freshState.hands?.[freshState.lastPlayerId] || []).length === 0;
     if (lastPlayerWon) {
+      const wonClaimedColor = freshState.lastClaimedCard.color;
+      const REAL_COLORS_WON = ['red', 'yellow', 'green', 'blue'];
       tx.update(roomRef, {
         status: 'ended', winner: freshState.lastPlayerId, winnerName: lp?.name,
-        topColor: freshState.lastClaimedCard.color, topValue: freshState.lastClaimedCard.value,
+        topColor: REAL_COLORS_WON.includes(wonClaimedColor) ? wonClaimedColor : REAL_COLORS_WON[0],
+        topValue: freshState.lastClaimedCard.value,
         challengeOpen: false, challengeBelieves: firebase.firestore.FieldValue.delete(),
         lastActualCard: null, lastClaimedCard: null,
         log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
