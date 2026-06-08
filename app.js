@@ -3714,7 +3714,11 @@ function scheduleAiAction(fn) {
   setTimeout(async () => {
     try { await fn(); }
     catch (e) { console.error('[AI]', e); }
-    finally { aiThinking = false; }
+    finally {
+      aiThinking = false;
+      // Re-run dispatch in case the action bailed (no Firestore write = no snapshot = no re-trigger)
+      if (roomState?.status === 'playing') maybeRunAI(roomState);
+    }
   }, delay);
 }
 
@@ -4018,14 +4022,21 @@ async function aiChallengeOrBelieve(state, aiPlayer) {
 }
 
 async function aiExecuteChallenge(state, aiId, aiName) {
-  const actual  = state.lastActualCard;
-  const claimed = state.lastClaimedCard;
-  const liar    = state.players.find(p => p.id === state.lastPlayerId);
-  const isLie   = actual.value !== claimed.value ||
-    (actual.color !== 'black' && actual.color !== claimed.color);
+  const roomRef = db.collection('rooms').doc(currentRoomId);
+  await db.runTransaction(async tx => {
+    const snap = await tx.get(roomRef);
+    if (!snap.exists) return;
+    const freshState = snap.data();
+    if (!freshState.challengeOpen) return;
 
-  let { hands, players, drawPile } = state;
-  let log = state.log;
+    const actual  = freshState.lastActualCard;
+    const claimed = freshState.lastClaimedCard;
+    const liar    = freshState.players.find(p => p.id === freshState.lastPlayerId);
+    const isLie   = actual.value !== claimed.value ||
+      (actual.color !== 'black' && actual.color !== claimed.color);
+
+    let { hands, players, drawPile } = freshState;
+    let log = freshState.log;
 
   if (isLie) {
     const { drawn, newDrawPile } = takeCards(drawPile, 1);
@@ -4048,7 +4059,7 @@ async function aiExecuteChallenge(state, aiId, aiName) {
   }
 
   log = addLog(log,
-    `✓ ${aiName} acusó a ${liar?.name}, pero ${liar?.name} dijo la Verdad (${cardLogName(actual)}). ${aiName} roba 1.`
+    `✓ ${aiName} acusó a ${liar?.name}, pero ${liar?.name} dijo la Verdad (${actual?.value === 'wild' ? 'Comodín' : actual?.value === 'wild4' ? 'Comodín +4' : cardLogName(actual)}). ${aiName} roba 1.`
   );
   const lastPlayerWon = (hands?.[state.lastPlayerId] || []).length === 0;
 
