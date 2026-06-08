@@ -3799,6 +3799,19 @@ async function aiTakeTurn(state, aiPlayer) {
   await aiDrawAndPass(state, aiId, aiName);
 }
 
+// ---- Shared write helper: reads fresh log in a transaction before committing ----
+// Prevents bot turn writes from overwriting log entries made by players during the
+// bot's thinking delay (e.g. player yelling UNO right after playing their card).
+
+async function aiBotWrite(otherFields, logMsgs) {
+  const roomRef = db.collection('rooms').doc(currentRoomId);
+  await db.runTransaction(async (txn) => {
+    let log = (await txn.get(roomRef)).data()?.log;
+    for (const msg of logMsgs) log = addLog(log, msg);
+    txn.update(roomRef, { ...otherFields, log });
+  });
+}
+
 // ---- Play normal card (face-up) ----
 
 async function aiPlayNormalCard(state, aiId, aiName, actualCard, cardIndex, chosenColor) {
@@ -3813,9 +3826,7 @@ async function aiPlayNormalCard(state, aiId, aiName, actualCard, cardIndex, chos
 
   let topColor = actualCard.color;
   let topValue = actualCard.value;
-  let log = addLog(state.log,
-    `${aiName} jugó ${COLOR_NAME[actualCard.color]} ${VALUE_LABEL[actualCard.value]} boca arriba.`
-  );
+  const logMsgs = [`${aiName} jugó ${COLOR_NAME[actualCard.color]} ${VALUE_LABEL[actualCard.value]} boca arriba.`];
 
   const newHands = { ...state.hands, [aiId]: newHand };
   let players = state.players.map(p =>
@@ -3824,21 +3835,21 @@ async function aiPlayNormalCard(state, aiId, aiName, actualCard, cardIndex, chos
 
   if (actualCard.value === 'wild') {
     topColor = chosenColor || aiChooseColor(hand);
-    log = addLog(log, `${aiName} eligió el color ${COLOR_NAME[topColor]}.`);
+    logMsgs.push(`${aiName} eligió el color ${COLOR_NAME[topColor]}.`);
   }
 
   if (actualCard.value === '0') {
     const passedHands = passHands(newHands, state.players, state.direction);
     Object.assign(newHands, passedHands);
     players = players.map(p => ({ ...p, cardCount: (newHands[p.id] || []).length }));
-    log = addLog(log, 'Todos pasan su mano en la dirección actual.');
+    logMsgs.push('Todos pasan su mano en la dirección actual.');
   }
 
   const update = {
     players, hands: newHands, topColor, topValue,
     currentPlayerIndex: nextPlayerIndex(state),
     challengeOpen: false, lastActualCard: null, lastClaimedCard: null,
-    log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    lastActivity: firebase.firestore.FieldValue.serverTimestamp()
   };
 
   update.unoCallRequired = (newHand.length === 1 && !won)
@@ -3846,7 +3857,7 @@ async function aiPlayNormalCard(state, aiId, aiName, actualCard, cardIndex, chos
     : firebase.firestore.FieldValue.delete();
   if (won) { update.status = 'ended'; update.winner = aiId; update.winnerName = aiName; }
 
-  await db.collection('rooms').doc(currentRoomId).update(update);
+  await aiBotWrite(update, logMsgs);
 }
 
 async function aiPlayNormalCardWithSwap(state, aiId, aiName, actualCard, cardIndex) {
@@ -3854,9 +3865,7 @@ async function aiPlayNormalCardWithSwap(state, aiId, aiName, actualCard, cardInd
   const handAfterPlay = hand.filter((_, i) => i !== cardIndex);
   const won         = handAfterPlay.length === 0;
 
-  let log = addLog(state.log,
-    `${aiName} jugó ${COLOR_NAME[actualCard.color]} ${VALUE_LABEL[actualCard.value]} boca arriba.`
-  );
+  const logMsgs = [`${aiName} jugó ${COLOR_NAME[actualCard.color]} ${VALUE_LABEL[actualCard.value]} boca arriba.`];
 
   const newHands = { ...state.hands, [aiId]: handAfterPlay };
   let players = state.players.map(p =>
@@ -3869,7 +3878,7 @@ async function aiPlayNormalCardWithSwap(state, aiId, aiName, actualCard, cardInd
       newHands[aiId]        = newHands[target.id] || [];
       newHands[target.id]   = handAfterPlay;
       players = players.map(p => ({ ...p, cardCount: (newHands[p.id] || []).length }));
-      log = addLog(log, `${aiName} intercambió manos con ${target.name}.`);
+      logMsgs.push(`${aiName} intercambió manos con ${target.name}.`);
     }
   }
 
@@ -3880,7 +3889,7 @@ async function aiPlayNormalCardWithSwap(state, aiId, aiName, actualCard, cardInd
     currentPlayerIndex: nextPlayerIndex(state),
     challengeOpen: false, lastActualCard: null, lastClaimedCard: null,
     sevenSwapPending: firebase.firestore.FieldValue.delete(),
-    log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+    lastActivity: firebase.firestore.FieldValue.serverTimestamp()
   };
 
   update.unoCallRequired = (!won && myFinalHand.length === 1)
@@ -3888,7 +3897,7 @@ async function aiPlayNormalCardWithSwap(state, aiId, aiName, actualCard, cardInd
     : firebase.firestore.FieldValue.delete();
   if (won) { update.status = 'ended'; update.winner = aiId; update.winnerName = aiName; }
 
-  await db.collection('rooms').doc(currentRoomId).update(update);
+  await aiBotWrite(update, logMsgs);
 }
 
 // ---- Play liar card (face-down) ----
@@ -3903,11 +3912,7 @@ async function aiDoPlayCard(state, aiId, aiName, actualCard, claimedCard, cardIn
     p.id === aiId ? { ...p, cardCount: newHand.length } : p
   );
 
-  const log = addLog(state.log,
-    `${aiName} jugó una carta boca abajo y dijo ${cardLogName(claimedCard)}.`
-  );
-
-  await db.collection('rooms').doc(currentRoomId).update({
+  await aiBotWrite({
     players, hands: newHands,
     lastPlayerId: aiId, lastActualCard: actualCard, lastClaimedCard: claimedCard,
     prevTopColor: state.topColor, prevTopValue: state.topValue,
@@ -3915,8 +3920,8 @@ async function aiDoPlayCard(state, aiId, aiName, actualCard, claimedCard, cardIn
     unoCallRequired: newHand.length === 1
       ? { playerId: aiId, playerName: aiName }
       : firebase.firestore.FieldValue.delete(),
-    log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-  });
+    lastActivity: firebase.firestore.FieldValue.serverTimestamp()
+  }, [`${aiName} jugó una carta boca abajo y dijo ${cardLogName(claimedCard)}.`]);
 }
 
 // ---- Draw and pass ----
@@ -3929,12 +3934,11 @@ async function aiDrawAndPass(state, aiId, aiName) {
     p.id === aiId ? { ...p, cardCount: hand.length } : p
   );
 
-  await db.collection('rooms').doc(currentRoomId).update({
+  await aiBotWrite({
     hands: newHands, drawPile: newDrawPile, players,
     currentPlayerIndex: nextPlayerIndex(state),
-    log: addLog(state.log, `${aiName} robó una carta y pasó.`),
     lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-  });
+  }, [`${aiName} robó una carta y pasó.`]);
 }
 
 // ---- Challenge / Believe ----
