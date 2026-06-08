@@ -1037,7 +1037,7 @@ function renderUnoAlert(state) {
         await db.collection('rooms').doc(currentRoomId).update({
           unoAlert: firebase.firestore.FieldValue.delete()
         });
-      }, 3000);
+      }, 6000);
     }
   } else {
     alertEl.classList.add('hidden');
