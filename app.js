@@ -3866,7 +3866,11 @@ async function aiTakeTurn(state, aiPlayer) {
 async function aiBotWrite(otherFields, logMsgs) {
   const roomRef = db.collection('rooms').doc(currentRoomId);
   await db.runTransaction(async (txn) => {
-    let log = (await txn.get(roomRef)).data()?.log;
+    const freshData = (await txn.get(roomRef)).data();
+    if (!freshData) return;
+    // Stale turn action racing a challenge that's already in progress — bail.
+    if (freshData.challengeOpen) return;
+    let log = freshData.log;
     for (const msg of logMsgs) log = addLog(log, msg);
     txn.update(roomRef, { ...otherFields, log });
   });
