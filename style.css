@@ -758,6 +758,7 @@ input[type=text]:focus { border-color: var(--blue); }
   gap: 0;
   scrollbar-width: thin;
   scrollbar-color: rgba(255,255,255,.2) transparent;
+  user-select: text;
 }
 .game-log::-webkit-scrollbar { width: 4px; }
 .game-log::-webkit-scrollbar-track { background: transparent; }

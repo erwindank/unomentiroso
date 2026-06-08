@@ -1050,9 +1050,15 @@ function renderUnoAlert(state) {
   }
 }
 
+function getUnoQueue(raw) {
+  if (!raw) return [];
+  return Array.isArray(raw) ? raw : [raw];
+}
+
 function renderUnoCallOverlay(state) {
   const overlay = document.getElementById('uno-call-overlay');
-  const req = state.unoCallRequired;
+  const queue = getUnoQueue(state.unoCallRequired);
+  const req = queue[0] || null;
 
   if (!req || state.challengeOpen) {
     if (!unoCallInProgress) {
@@ -1068,8 +1074,9 @@ function renderUnoCallOverlay(state) {
     currentUnoCallRequired = null;
     if (!unoCallClearPending) {
       unoCallClearPending = true;
+      const newQueue = queue.slice(1);
       db.collection('rooms').doc(currentRoomId).update({
-        unoCallRequired: firebase.firestore.FieldValue.delete()
+        unoCallRequired: newQueue.length > 0 ? newQueue : firebase.firestore.FieldValue.delete()
       }).catch(() => {}).then(() => { unoCallClearPending = false; });
     }
     return;
@@ -1104,18 +1111,22 @@ async function handleUnoCallBtn() {
       const doc = await transaction.get(roomRef);
       const state = doc.data();
 
-      // Bail out if unoCallRequired was already resolved or changed to a different player
-      if (!state.unoCallRequired || state.unoCallRequired.playerId !== req.playerId) return;
+      // Bail out if unoCallRequired no longer contains this player
+      const freshQueue = getUnoQueue(state.unoCallRequired);
+      if (!freshQueue.some(r => r.playerId === req.playerId)) return;
 
       // Bail out if they no longer have exactly 1 card
       const reqPlayer = state.players.find(p => p.id === req.playerId);
       if (!reqPlayer || reqPlayer.cardCount !== 1) return;
 
+      const newQueue = freshQueue.filter(r => r.playerId !== req.playerId);
+      const unoCallUpdate = newQueue.length > 0 ? newQueue : firebase.firestore.FieldValue.delete();
+
       if (req.playerId === localUid) {
-        // Saving myself — just clear the flag
+        // Saving myself — just remove from queue
         const log = addLog(state.log, `${localName} grita ¡UNO! 🎴`);
         transaction.update(roomRef, {
-          unoCallRequired: firebase.firestore.FieldValue.delete(),
+          unoCallRequired: unoCallUpdate,
           log,
           lastActivity: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -1134,7 +1145,7 @@ async function handleUnoCallBtn() {
           hands,
           players,
           drawPile: newDrawPile,
-          unoCallRequired: firebase.firestore.FieldValue.delete(),
+          unoCallRequired: unoCallUpdate,
           log,
           lastActivity: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -2148,7 +2159,7 @@ function checkNotifications(state) {
     status: state.status,
     currentPlayerIndex: state.currentPlayerIndex,
     challengeOpen: !!state.challengeOpen,
-    unoCallRequiredFor: state.unoCallRequired?.playerId || null,
+    unoCallRequiredFor: getUnoQueue(state.unoCallRequired).some(r => r.playerId === localUid) ? localUid : null,
   };
   if (!prev) return;
 
@@ -2177,7 +2188,7 @@ function checkNotifications(state) {
     notify(`${lp?.name || '?'} jugó una carta`, `Dice que jugó ${claimed}. ¿Lo crees?`);
     return;
   }
-  if (!prev.unoCallRequiredFor && state.unoCallRequired?.playerId === localUid) {
+  if (!prev.unoCallRequiredFor && getUnoQueue(state.unoCallRequired).some(r => r.playerId === localUid)) {
     notify('¡UNO!', '¡Solo te queda 1 carta! Grita UNO antes de que alguien te atrape.');
   }
 }
@@ -2496,13 +2507,31 @@ async function finalizeWildColor(color) {
   if (!wc || wc.phase !== 'choosing') return;
   if (wc.chooserId !== localUid) return;
 
+  const myFinalHand = state.hands?.[localUid] || [];
+  const won = myFinalHand.length === 0;
+
   const log = addLog(state.log, `${localName} elige el color final: ${COLOR_NAME[color]}.`);
-  await db.collection('rooms').doc(currentRoomId).update({
+  const update = {
     topColor: color, topValue: 'wild',
     currentPlayerIndex: wc.nextPlayerIndex,
     wildChallenge: firebase.firestore.FieldValue.delete(),
     log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-  });
+  };
+
+  const unoEntries = won ? [] : state.players
+    .filter(p => (state.hands?.[p.id] || []).length === 1)
+    .map(p => ({ playerId: p.id, playerName: p.name }));
+  update.unoCallRequired = unoEntries.length > 0
+    ? unoEntries
+    : firebase.firestore.FieldValue.delete();
+
+  if (won) {
+    update.status = 'ended';
+    update.winner = localUid;
+    update.winnerName = localName;
+  }
+
+  await db.collection('rooms').doc(currentRoomId).update(update);
 }
 
 function buildWcCardTable(wc, state) {
@@ -2713,7 +2742,7 @@ async function playNormalCardWithSwap(actualCard, cardIndex, targetId) {
   };
 
   update.unoCallRequired = (!won && myFinalHand.length === 1)
-    ? { playerId: localUid, playerName: localName }
+    ? [{ playerId: localUid, playerName: localName }]
     : firebase.firestore.FieldValue.delete();
 
   if (won) {
@@ -2822,7 +2851,7 @@ async function playNormalCard(actualCard, cardIndex, chosenColor = null) {
   };
 
   update.unoCallRequired = (newHand.length === 1 && !won)
-    ? { playerId: localUid, playerName: localName }
+    ? [{ playerId: localUid, playerName: localName }]
     : firebase.firestore.FieldValue.delete();
 
   if (won) {
@@ -2870,7 +2899,7 @@ async function doPlayCard(actualCard, claimedCard, cardIndex) {
     challengeOpen: true,
     challengeBelieves: [],
     unoCallRequired: newHand.length === 1
-      ? { playerId: localUid, playerName: localName }
+      ? [{ playerId: localUid, playerName: localName }]
       : firebase.firestore.FieldValue.delete(),
     log,
     lastActivity: firebase.firestore.FieldValue.serverTimestamp()
@@ -3329,9 +3358,11 @@ async function callUno() {
   const targets = state.players.filter(p => p.id !== localUid && p.cardCount === 1);
 
   if (myHand.length === 1) {
+    const queue = getUnoQueue(state.unoCallRequired);
+    const newQueue = queue.filter(r => r.playerId !== localUid);
     const log = addLog(state.log, `${localName} dice ¡UNO! 🎴`);
     await db.collection('rooms').doc(currentRoomId).update({
-      unoCallRequired: firebase.firestore.FieldValue.delete(),
+      unoCallRequired: newQueue.length > 0 ? newQueue : firebase.firestore.FieldValue.delete(),
       log,
       lastActivity: firebase.firestore.FieldValue.serverTimestamp()
     });
@@ -3727,10 +3758,14 @@ function maybeRunAI(state) {
     return;
   }
 
-  if (state.unoCallRequired) {
-    const req = state.unoCallRequired;
-    const aiOwner = state.players.find(p => p.id === req.playerId && p.isAI);
-    if (aiOwner) { scheduleAiAction(() => aiCallUno(state, aiOwner)); return; }
+  const unoReqs = getUnoQueue(state.unoCallRequired);
+  if (unoReqs.length > 0) {
+    const aiReq = unoReqs.find(r => state.players.find(p => p.id === r.playerId && p.isAI));
+    if (aiReq) {
+      const aiOwner = state.players.find(p => p.id === aiReq.playerId);
+      scheduleAiAction(() => aiCallUno(state, aiOwner));
+      return;
+    }
   }
 
   const currentPlayer = state.players[state.currentPlayerIndex];
@@ -3853,7 +3888,7 @@ async function aiPlayNormalCard(state, aiId, aiName, actualCard, cardIndex, chos
   };
 
   update.unoCallRequired = (newHand.length === 1 && !won)
-    ? { playerId: aiId, playerName: aiName }
+    ? [{ playerId: aiId, playerName: aiName }]
     : firebase.firestore.FieldValue.delete();
   if (won) { update.status = 'ended'; update.winner = aiId; update.winnerName = aiName; }
 
@@ -3893,7 +3928,7 @@ async function aiPlayNormalCardWithSwap(state, aiId, aiName, actualCard, cardInd
   };
 
   update.unoCallRequired = (!won && myFinalHand.length === 1)
-    ? { playerId: aiId, playerName: aiName }
+    ? [{ playerId: aiId, playerName: aiName }]
     : firebase.firestore.FieldValue.delete();
   if (won) { update.status = 'ended'; update.winner = aiId; update.winnerName = aiName; }
 
@@ -3918,7 +3953,7 @@ async function aiDoPlayCard(state, aiId, aiName, actualCard, claimedCard, cardIn
     prevTopColor: state.topColor, prevTopValue: state.topValue,
     challengeOpen: true, challengeBelieves: [],
     unoCallRequired: newHand.length === 1
-      ? { playerId: aiId, playerName: aiName }
+      ? [{ playerId: aiId, playerName: aiName }]
       : firebase.firestore.FieldValue.delete(),
     lastActivity: firebase.firestore.FieldValue.serverTimestamp()
   }, [`${aiName} jugó una carta boca abajo y dijo ${cardLogName(claimedCard)}.`]);
@@ -4262,11 +4297,13 @@ async function aiCallUno(state, aiPlayer) {
   await db.runTransaction(async (transaction) => {
     const doc = await transaction.get(roomRef);
     const fresh = doc.data();
-    // Bail if unoCallRequired was already resolved or stolen by another player's card
-    if (!fresh.unoCallRequired || fresh.unoCallRequired.playerId !== aiPlayer.id) return;
+    // Bail if unoCallRequired no longer contains this bot
+    const freshQueue = getUnoQueue(fresh.unoCallRequired);
+    if (!freshQueue.some(r => r.playerId === aiPlayer.id)) return;
+    const newQueue = freshQueue.filter(r => r.playerId !== aiPlayer.id);
     const log = addLog(fresh.log, `${aiPlayer.name} grita ¡UNO! 🎴`);
     transaction.update(roomRef, {
-      unoCallRequired: firebase.firestore.FieldValue.delete(),
+      unoCallRequired: newQueue.length > 0 ? newQueue : firebase.firestore.FieldValue.delete(),
       log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
     });
   });
