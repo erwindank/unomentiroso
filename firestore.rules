@@ -1,0 +1,20 @@
+rules_version = '2';
+
+// Replaces the console's default "test mode" rules, which grant blanket access
+// only until a hardcoded expiry date and then deny everything — the app kept
+// working right up until that date passed, with no code change involved.
+//
+// Gate on sign-in instead of on a date, so these never expire. init() calls
+// signInAnonymously() before any room read or write, so every legitimate client
+// has request.auth set.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // The only collection the app touches. Room state is shared by everyone at
+    // the table and is rewritten by whoever acts next — turns, hands, the log —
+    // so it is deliberately not scoped to a per-document owner.
+    match /rooms/{roomId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
