@@ -447,3 +447,7 @@ button.seg-btn:hover { border-color: #4a7eff; }
 #invite-qr-code { padding: 10px; background: #fff; border-radius: 12px; min-width: 192px; min-height: 192px; display: flex; align-items: center; justify-content: center; color: #333; font-size: .8rem; }
 #screen-lobby { overflow-y: auto; justify-content: flex-start; padding: 1.5rem 0 max(1.5rem, env(safe-area-inset-bottom)); }
 #screen-lobby .lobby-card { margin: auto 0; }
+/* Start page: the new buttons made it taller than many screens — scroll when it doesn't
+   fit, stay centred when it does (style.css only allowed scrolling on small screens) */
+#screen-landing { overflow-y: auto; justify-content: flex-start; padding: 1.5rem 0 max(1.5rem, env(safe-area-inset-bottom)); }
+#screen-landing .landing-card { margin: auto 0; flex-shrink: 0; }
