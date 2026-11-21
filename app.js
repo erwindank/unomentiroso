@@ -57,10 +57,10 @@ function rainbowHTML(text) {
 function cardStatusHTML(card) {
   if (!card) return '?';
   const hex = LOG_COLOR_HEX[card.color] || '#fff';
-  const colorSpan = `<span style="color:${hex};font-weight:700">${COLOR_NAME[card.color]}</span>`;
-  if (card.value === 'wild')  return `${rainbowHTML('Comodín')} y cambia el color a ${colorSpan}`;
-  if (card.value === 'wild4') return `${rainbowHTML('Comodín')} <b>+4</b> y cambia el color a ${colorSpan}`;
-  return `<span style="color:${hex};font-weight:700">${COLOR_NAME[card.color]} ${VALUE_LABEL[card.value]}</span>`;
+  const colorSpan = `<span style="color:${hex};font-weight:700">${colorLabel(card.color)}</span>`;
+  if (card.value === 'wild')  return t('card.wildTo', { w: rainbowHTML(t('card.wild')), c: colorSpan });
+  if (card.value === 'wild4') return t('card.wild4To', { w: rainbowHTML(t('card.wild')), c: colorSpan });
+  return `<span style="color:${hex};font-weight:700">${colorLabel(card.color)} ${VALUE_LABEL[card.value]}</span>`;
 }
 
 function cardLogName(card) {
@@ -284,6 +284,9 @@ async function init() {
   } else if (musicEnabled === null && !savedRoom) {
     setTimeout(showMusicPrompt, 700);
   }
+
+  // Invite links (?sala=CODE) — extras.js
+  if (typeof handleInviteParam === 'function') handleInviteParam();
 }
 
 init();
@@ -310,14 +313,15 @@ const LOG_VALUE_PAT = '[0-9⊘↺C]|\\+[24]';
 
 function colorizeLog(msg) {
   let s = esc(msg);
-  s = s.replace(new RegExp(`Comodín(?:\\s+(${LOG_VALUE_PAT}))?`, 'g'), (_, val) => {
-    const rain = 'Comodín'.split('').map((ch, i) =>
+  // (Spanish or English words: the log is translated for display when English is on)
+  s = s.replace(new RegExp(`(Comodín|Wild)(?:\\s+(${LOG_VALUE_PAT}))?`, 'g'), (_, word, val) => {
+    const rain = word.split('').map((ch, i) =>
       `<span style="color:${LOG_WILD_COLORS[i % 4]};font-weight:700">${ch}</span>`
     ).join('');
     return val ? rain + `<b> ${val}</b>` : rain;
   });
-  s = s.replace(new RegExp(`(Rojo|Amarillo|Verde|Azul)(?:\\s+(${LOG_VALUE_PAT}))?`, 'g'), (_, name, val) => {
-    const key = Object.entries(COLOR_NAME).find(([, v]) => v === name)?.[0];
+  s = s.replace(new RegExp(`(?<!\\p{L})(Rojo|Amarillo|Verde|Azul|Red|Yellow|Green|Blue)(?!\\p{L})(?:\\s+(${LOG_VALUE_PAT}))?`, 'gu'), (_, name, val) => {
+    const key = { Rojo: 'red', Amarillo: 'yellow', Verde: 'green', Azul: 'blue', Red: 'red', Yellow: 'yellow', Green: 'green', Blue: 'blue' }[name];
     const hex = LOG_COLOR_HEX[key] || '#fff';
     return `<span class="log-color-${key}" style="color:${hex};font-weight:700">${name}${val ? ' '+val : ''}</span>`;
   });
@@ -374,10 +378,10 @@ function showScreen(id) {
       setTimeout(openSpotifyModal, 400);
     } else if (cbErr) {
       sessionStorage.removeItem('spotify_callback_error');
-      const msg = cbErr === 'access_denied'   ? 'Cancelaste la conexión con Spotify.'
-                : cbErr === 'verifier_missing' ? 'Error de sesión Spotify. Intenta de nuevo.'
-                : cbErr === 'fetch_failed'     ? 'No se pudo contactar Spotify. Revisa tu conexión.'
-                :                               `Error de Spotify: ${cbErr}`;
+      const msg = cbErr === 'access_denied'   ? t('sp.cancel')
+                : cbErr === 'verifier_missing' ? t('sp.session')
+                : cbErr === 'fetch_failed'     ? t('sp.fetch')
+                :                               t('sp.other', { e: cbErr });
       setTimeout(() => showSpotifyError(msg), 400);
     }
   }
@@ -457,8 +461,8 @@ function showJoin() {
 
 async function handleCreate() {
   const rawName = document.getElementById('player-name').value.trim();
-  if (!rawName) { showLandingError('Escribe tu nombre primero'); return; }
-  if (!localUid) { showLandingError('Aún conectando… intenta de nuevo'); return; }
+  if (!rawName) { showLandingError(t('err.name')); return; }
+  if (!localUid) { showLandingError(t('err.connecting')); return; }
   const name = selectedEmoji ? selectedEmoji + ' ' + rawName : rawName;
   localName = name;
 
@@ -504,18 +508,19 @@ function getUniqueName(desiredName, players) {
 async function handleJoin() {
   const rawName = document.getElementById('player-name').value.trim();
   const code = document.getElementById('room-code-input').value.trim().toUpperCase();
-  if (!rawName) { showLandingError('Escribe tu nombre primero'); return; }
-  if (code.length !== 6) { showLandingError('Introduce el código de sala de 6 caracteres'); return; }
-  if (!localUid) { showLandingError('Aún conectando… intenta de nuevo'); return; }
+  if (!rawName) { showLandingError(t('err.name')); return; }
+  if (code.length !== 6) { showLandingError(t('err.code')); return; }
+  if (!localUid) { showLandingError(t('err.connecting')); return; }
   const name = selectedEmoji ? selectedEmoji + ' ' + rawName : rawName;
 
   const snap = await db.collection('rooms').doc(code).get();
-  if (!snap.exists) { showLandingError('Sala no encontrada'); return; }
+  // VIRUS! rooms live in the same collection (tagged game: 'virus') — not ours
+  if (!snap.exists || snap.data()?.game) { showLandingError(t('err.notFound')); return; }
   const data = snap.data();
-  if (data.status === 'ended') { showLandingError('La partida ya terminó'); return; }
+  if (data.status === 'ended') { showLandingError(t('err.ended')); return; }
 
   if (data.status === 'lobby') {
-    if (data.players.length >= 10) { showLandingError('Sala llena (máximo 10)'); return; }
+    if (data.players.length >= 10) { showLandingError(t('err.full', { n: 10 })); return; }
 
     if (!data.players.find(p => p.id === localUid)) {
       const uniqueName = getUniqueName(name, data.players);
@@ -566,7 +571,7 @@ async function handleJoin() {
       localName = existingPlayer.name;
     } else {
       // New player joining mid-game: deal 7 cards from the draw pile
-      if (data.players.length >= 10) { showLandingError('Sala llena (máximo 10)'); return; }
+      if (data.players.length >= 10) { showLandingError(t('err.full', { n: 10 })); return; }
       const uniqueName = getUniqueName(name, data.players);
       const { drawn, newDrawPile } = takeCards(data.drawPile, 7);
       localName = uniqueName;
@@ -590,7 +595,8 @@ async function handleJoin() {
 async function tryRejoin(roomId) {
   try {
     const snap = await db.collection('rooms').doc(roomId).get();
-    if (!snap.exists) { sessionStorage.clear(); return; }
+    // (sessionStorage is shared with VIRUS! on the same site; its rooms carry `game`)
+    if (!snap.exists || snap.data()?.game) { sessionStorage.clear(); return; }
     const data = snap.data();
     const player = data.players.find(p => p.id === localUid);
     if (!player) { sessionStorage.clear(); return; }
@@ -617,15 +623,15 @@ async function tryRejoin(roomId) {
 function copyCode() {
   navigator.clipboard.writeText(currentRoomId).catch(() => {});
   const btn = document.querySelector('.btn-copy');
-  btn.textContent = '¡Copiado!';
-  setTimeout(() => { btn.textContent = 'Copiar'; }, 1500);
+  btn.textContent = t('ui.copied');
+  setTimeout(() => { btn.textContent = t('ui.copy'); }, 1500);
 }
 
 function copyGameCode(el) {
   navigator.clipboard.writeText(currentRoomId).catch(() => {});
   const textEl = el.querySelector('#game-room-code-text');
   const original = textEl.textContent;
-  textEl.textContent = '¡Copiado!';
+  textEl.textContent = t('ui.copied');
   el.querySelector('svg').style.display = 'none';
   setTimeout(() => {
     textEl.textContent = original;
@@ -655,6 +661,8 @@ function setupPresence(roomId) {
       if (player.isAI) continue;
 
       if (!present[player.id]) {
+        // Y5: remember since when they're gone, so their seat can say "Reconectando…"
+        if (!presenceMissingSince[player.id]) presenceMissingSince[player.id] = Date.now();
         if (!disconnectTimers[player.id]) {
           const pid  = player.id;
           const pname = player.name;
@@ -666,13 +674,27 @@ function setupPresence(roomId) {
           }, 180000);
         }
       } else {
+        delete presenceMissingSince[player.id];
         if (disconnectTimers[player.id]) {
           clearTimeout(disconnectTimers[player.id]);
           delete disconnectTimers[player.id];
         }
       }
     }
+    if (roomState?.status === 'playing') renderOpponents(roomState);
   });
+}
+
+// Y5 — reconnect grace time. pid -> when their presence disappeared (my clock).
+// Their seat shows "Reconectando…"; on their own turn they get RECONNECT_TURN_GRACE
+// before being marked disconnected (which skips them); otherwise the 3-minute timer above.
+const presenceMissingSince = {};
+const RECONNECT_TURN_GRACE = 30000;
+function checkReconnectGrace(state) {
+  const cur = state.players[state.currentPlayerIndex];
+  if (!cur || cur.isAI || cur.disconnected || cur.id === localUid) return;
+  const since = presenceMissingSince[cur.id];
+  if (since && Date.now() - since > RECONNECT_TURN_GRACE) markPlayerDisconnected(cur.id, cur.name);
 }
 
 function teardownPresence() {
@@ -689,6 +711,7 @@ function teardownPresence() {
     clearTimeout(disconnectTimers[uid]);
     delete disconnectTimers[uid];
   });
+  Object.keys(presenceMissingSince).forEach(uid => delete presenceMissingSince[uid]);
   if (voiceActivityRef) { voiceActivityRef.off(); voiceActivityRef = null; }
   voiceActivityLoaded = false;
 }
@@ -703,26 +726,26 @@ function setupVoiceActivityListener(roomId) {
     const uid = snap.key;
     if (uid === localUid) return;
     const player = roomState?.players?.find(p => p.id === uid);
-    const name = player?.name || 'Alguien';
-    notify('🎤 Chat de voz', `${name} abrió el micrófono.`);
-    showVoiceJoinToast(`🎤 ${name} abrió el micrófono`);
+    const name = player?.name || t('ui.someone');
+    notify('🎤 ' + t('vc.title'), t('vc.opened', { name }));
+    showVoiceJoinToast('🎤 ' + t('vc.opened', { name }));
   });
   ref.on('child_removed', snap => {
     const uid = snap.key;
     if (uid === localUid) return;
     const player = roomState?.players?.find(p => p.id === uid);
-    const name = player?.name || 'Alguien';
-    showVoiceJoinToast(`📵 ${name} dejó el chat de voz`);
+    const name = player?.name || t('ui.someone');
+    showVoiceJoinToast('📵 ' + t('vc.left', { name }));
   });
   ref.on('child_changed', snap => {
     const uid = snap.key;
     if (uid === localUid) return;
     const player = roomState?.players?.find(p => p.id === uid);
-    const name = player?.name || 'Alguien';
+    const name = player?.name || t('ui.someone');
     if (snap.val()?.muted) {
-      showVoiceJoinToast(`🔇 ${name} silenció el micrófono`);
+      showVoiceJoinToast('🔇 ' + t('vc.muted', { name }));
     } else {
-      showVoiceJoinToast(`🎤 ${name} activó el micrófono`);
+      showVoiceJoinToast('🎤 ' + t('vc.unmuted', { name }));
     }
   });
   ref.once('value', () => { voiceActivityLoaded = true; });
@@ -785,6 +808,7 @@ function skipDisconnectedTurn(state) {
 function subscribeToRoom(roomId) {
   if (roomUnsub) roomUnsub();
   prevNotifState = null;
+  fxPrevState = null;
   roomUnsub = db.collection('rooms').doc(roomId).onSnapshot(snap => {
     if (!snap.exists) return;
     roomState = snap.data();
@@ -805,7 +829,8 @@ function onRoomUpdate(state) {
     // Check if all players agreed to end — any client that detects it triggers the update;
     // Firestore's atomic write means duplicate triggers just overwrite with the same result.
     const votes = state.endVotes || [];
-    const connectedPlayers = state.players.filter(p => !p.disconnected);
+    // Bots never vote, so only connected people count
+    const connectedPlayers = state.players.filter(p => !p.disconnected && !p.isAI);
     if (connectedPlayers.length > 0 && connectedPlayers.every(p => votes.includes(p.id))) {
       const result = determineWinner(state);
       db.collection('rooms').doc(currentRoomId).update({
@@ -829,10 +854,25 @@ function onRoomUpdate(state) {
     renderGame(state);
     maybeRunAI(state);
   } else if (state.status === 'ended') {
+    // R6: when the game ends while I'm watching, let the last card land on the table
+    // first, then show the winner screen
+    const onGame = document.getElementById('screen-game').classList.contains('active');
+    if (onGame && fxPrevState?.status === 'playing') {
+      renderGame(state);
+      winnerHoldUntil = Date.now() + 2600;
+    }
+    if (Date.now() < winnerHoldUntil) {
+      clearTimeout(winnerHoldTimer);
+      winnerHoldTimer = setTimeout(() => {
+        if (roomState?.status === 'ended') { showScreen('winner'); renderWinner(roomState); }
+      }, winnerHoldUntil - Date.now());
+      return;
+    }
     showScreen('winner');
     renderWinner(state);
   }
 }
+let winnerHoldUntil = 0, winnerHoldTimer = null;
 
 // ============================================================
 // LOBBY RENDER
@@ -850,13 +890,13 @@ function renderLobby(state) {
     const isReady   = readyVotes.includes(p.id);
     const wasHere   = isRematch && prevNames.includes(p.name);
     const removeBtn = (isHost && p.isAI)
-      ? `<button class="btn-remove-bot" onclick="handleRemoveBot('${p.id}')" title="Eliminar bot">×</button>`
+      ? `<button class="btn-remove-bot" onclick="handleRemoveBot('${p.id}')" title="${t('lob.removeBot')}">×</button>`
       : '';
     return `<div class="player-item ${p.id === localUid ? 'me' : ''} ${p.disconnected ? 'player-disconnected' : ''} ${p.isAI ? 'ai-player' : ''}">
       ${p.id === state.hostId ? '👑 ' : ''}${esc(p.name)}
-      ${wasHere ? '<span class="prev-badge">vuelve</span>' : ''}
-      ${isReady  ? '<span class="ready-badge">✓ listo</span>' : ''}
-      ${p.disconnected ? ' <span class="dc-badge">desconectado</span>' : ''}
+      ${wasHere ? `<span class="prev-badge">${t('lob.back')}</span>` : ''}
+      ${isReady  ? `<span class="ready-badge">${t('lob.readyBadge')}</span>` : ''}
+      ${p.disconnected ? ` <span class="dc-badge">${t('lob.dc')}</span>` : ''}
       ${removeBtn}
     </div>`;
   }).join('');
@@ -871,8 +911,8 @@ function renderLobby(state) {
   if (isRematch) {
     const alreadyReady = readyVotes.includes(localUid);
     readyArea.innerHTML = alreadyReady
-      ? '<p class="muted ready-confirmed">✓ Estás listo para jugar</p>'
-      : '<button class="btn btn-primary" onclick="handleReadyVote()">¡Quiero jugar de nuevo!</button>';
+      ? `<p class="muted ready-confirmed">${t('lob.ready')}</p>`
+      : `<button class="btn btn-primary" onclick="handleReadyVote()">${t('lob.again')}</button>`;
   } else {
     readyArea.innerHTML = '';
   }
@@ -886,7 +926,7 @@ function renderLobby(state) {
 
   if (isHost) {
     startBtn.disabled = !canStart;
-    startBtn.textContent = canStart ? 'Iniciar partida' : 'Esperando jugadores…';
+    startBtn.textContent = canStart ? t('lob.start') : t('lob.waitingPlayers');
   }
 
   // Add Bot button (host only)
@@ -897,10 +937,13 @@ function renderLobby(state) {
     document.querySelector('.lobby-actions').appendChild(botArea);
   }
   if (isHost && state.players.length < 10) {
-    botArea.innerHTML = `<button class="btn btn-bot" onclick="handleAddBot()">+ Agregar Bot 🤖</button>`;
+    botArea.innerHTML = `<button class="btn btn-bot" onclick="handleAddBot()">${t('lob.addBot')}</button>`;
   } else {
     botArea.innerHTML = '';
   }
+
+  // Invite link, turn timer, bot level (extras.js)
+  if (typeof renderLobbyExtras === 'function') renderLobbyExtras(state, isHost);
 }
 
 // ============================================================
@@ -946,6 +989,9 @@ async function handleStart() {
     winnerName: null,
     winnerReason: null,
     endVotes: [],
+    stats: {},   // match counts for the awards (extras.js)
+    gameNo: (roomState.gameNo || 0) + 1,   // which game in this room (room score, extras.js)
+    seriesDone: false,
     lastActivity: firebase.firestore.FieldValue.serverTimestamp()
   });
 }
@@ -954,13 +1000,8 @@ async function handleAddBot() {
   if (!roomState || roomState.status !== 'lobby') return;
   if (roomState.hostId !== localUid) return;
   if (roomState.players.length >= 10) return;
-  const botCount = roomState.players.filter(p => p.isAI).length;
-  const botName  = botCount === 0 ? '🤖 Bot' : `🤖 Bot ${botCount + 1}`;
-  const botId    = 'ai-' + Math.random().toString(36).slice(2, 9);
   await db.collection('rooms').doc(currentRoomId).update({
-    players: firebase.firestore.FieldValue.arrayUnion(
-      { id: botId, name: botName, cardCount: 0, isAI: true }
-    ),
+    players: firebase.firestore.FieldValue.arrayUnion(makeBot(roomState.players)),
     lastActivity: firebase.firestore.FieldValue.serverTimestamp()
   });
 }
@@ -978,7 +1019,11 @@ async function handleRemoveBot(botId) {
 // GAME RENDER
 // ============================================================
 
+// The state drawn last time; fx.js compares it with the new one to animate what changed
+let fxPrevState = null;
+
 function renderGame(state) {
+  const firstDraw = !fxPrevState;   // first draw after (re)joining: show, don't animate
   if (!isMyTurn(state)) drawnCardState = null;
   renderTopCard(state);
   renderOpponents(state);
@@ -1011,6 +1056,13 @@ function renderGame(state) {
   document.getElementById('draw-pile-area').classList.toggle('must-draw',     noPlayable);
   document.getElementById('draw-pile-area').classList.toggle('matching-liar', matchingLiarOnly);
   document.getElementById('draw-pile-area').classList.toggle('could-lie',     nonMatchingLiar);
+
+  // Flying cards, stamps, sounds for whatever changed since the last draw (fx.js)
+  if (fxPrevState && fxPrevState !== state) FX.onState(fxPrevState, state);
+  fxPrevState = state;
+
+  // Faces, turn banner, timer, danger alert, hand badges… (extras.js)
+  if (typeof afterGameRender === 'function') afterGameRender(state, firstDraw);
 }
 
 function renderTurnActions(state) {
@@ -1087,11 +1139,11 @@ function renderUnoCallOverlay(state) {
   const btn   = document.getElementById('uno-call-btn');
 
   if (req.playerId === localUid) {
-    label.textContent = '¡Solo te queda 1 carta!';
-    btn.textContent   = '¡GRITA UNO!';
+    label.textContent = t('uno.mine');
+    btn.textContent   = t('uno.shout');
   } else {
-    label.textContent = `¡${req.playerName} tiene 1 carta!`;
-    btn.textContent   = `GRITARLE UNO A ${req.playerName.toUpperCase()}`;
+    label.textContent = t('uno.other', { name: req.playerName });
+    btn.textContent   = t('uno.callOn', { name: req.playerName }).toUpperCase();
   }
 
   overlay.classList.remove('hidden');
@@ -1184,12 +1236,18 @@ function renderOpponents(state) {
     const hasVoice = !!peerConns[p.id];
     const miniCards = Array(Math.min(p.cardCount, 12)).fill(0)
       .map(() => `<div class="card-back mini"></div>`).join('');
+    // B3: 1–2 cards left glows red; Y5: "Reconectando…" while their connection is gone
+    const nearWin = p.cardCount > 0 && p.cardCount <= 2;
+    const reconnecting = !isDisconnected && !p.isAI && presenceMissingSince[p.id];
     return `<div class="opponent ${isCurrent && !state.challengeOpen ? 'active-player' : ''}
                                   ${isNext && state.challengeOpen ? 'active-player' : ''}
+                                  ${nearWin ? 'near-win' : ''}
                                   ${isDisconnected ? 'player-disconnected' : ''}
                                   ${isSpeaking ? 'voice-speaking' : ''}"
                  data-uid="${esc(p.id)}">
-      <div class="opponent-name">${esc(p.name)}${isDisconnected ? ' <span class="dc-badge">desconectado</span>' : ''}${hasVoice ? ' <span class="voice-mic-icon">🎤</span>' : ''}</div>
+      ${typeof seatFaceHTML === 'function' ? seatFaceHTML(state, p) : ''}
+      <div class="opponent-name">${esc(p.name)}${isDisconnected ? ` <span class="dc-badge">${t('lob.dc')}</span>` : ''}${hasVoice ? ' <span class="voice-mic-icon">🎤</span>' : ''}</div>
+      ${reconnecting ? `<span class="rc-badge" data-since="${presenceMissingSince[p.id]}" data-turn="${isCurrent ? 1 : 0}">${t('rc.label')}</span>` : ''}
       <div class="opponent-cards">${miniCards}</div>
       <div class="opponent-count">${p.cardCount}🃏</div>
     </div>`;
@@ -1210,11 +1268,11 @@ function renderStatus(state) {
   if (state.challengeOpen && state.lastClaimedCard) {
     const lp = state.players.find(p => p.id === state.lastPlayerId);
     const c  = state.lastClaimedCard;
-    el.innerHTML = `${esc(lp?.name || '?')} jugó — dice ${cardStatusHTML(c)}`;
+    el.innerHTML = t('st.played', { name: esc(lp?.name || '?'), card: cardStatusHTML(c) });
   } else if (myTurn) {
-    el.textContent = '✨ ¡Tu turno! Elige una carta.';
+    el.textContent = t('st.yourTurn');
   } else {
-    el.textContent = `Turno de ${current?.name || '?'}`;
+    el.textContent = t('st.turnOf', { name: current?.name || '?' });
   }
 }
 
@@ -1240,14 +1298,14 @@ function renderChallengeArea(state) {
 
     let believeStatus = '';
     if (believed.length > 0) {
-      believeStatus = `<div class="believe-votes">✓ ${believed.map(p => esc(p.name)).join(', ')} lo cree${believed.length > 1 ? 'n' : ''}</div>`;
+      believeStatus = `<div class="believe-votes">✓ ${t(believed.length > 1 ? 'ch.believeN' : 'ch.believe1', { names: believed.map(p => esc(p.name)).join(', ') })}</div>`;
     }
     if (waiting.length > 0 && believed.length > 0) {
-      believeStatus += `<div class="believe-waiting">Esperando: ${waiting.map(p => esc(p.name)).join(', ')}</div>`;
+      believeStatus += `<div class="believe-waiting">${t('ch.waiting', { names: waiting.map(p => esc(p.name)).join(', ') })}</div>`;
     }
 
     txt.innerHTML =
-      `${esc(lp?.name || '?')} dice que jugó ${cardStatusHTML(c)}. ¿Lo crees?${believeStatus}`;
+      `${t('ch.question', { name: esc(lp?.name || '?'), card: cardStatusHTML(c) })}${believeStatus}`;
 
     // Show/hide the believe button based on whether current user already voted
     const believeBtn = document.getElementById('believe-btn');
@@ -1289,11 +1347,11 @@ function renderHand(state) {
 
   if (inDrawMode) {
     document.getElementById('hand-label').textContent = drawnCardState.canPlay
-      ? '¡Carta robada jugable! Juega cualquier carta válida o pasa.'
-      : 'Carta robada no jugable. Juega una carta válida o pasa.';
+      ? t('hand.drawnOk')
+      : t('hand.drawnNo');
   } else {
     document.getElementById('hand-label').textContent =
-      myTurn ? 'Tu turno — haz clic en una carta para jugar' : `Tu mano (${myHand.length})`;
+      myTurn ? t('hand.pick') : t('hand.count', { n: myHand.length });
   }
 
   // Yellow glow when it's my turn
@@ -1311,14 +1369,14 @@ function renderHand(state) {
     const nextName = esc(state.players[nextIdx]?.name || '—');
     const curName  = esc(state.players[curIdx]?.name  || '—');
     const center = myTurn
-      ? `<span class="toi-label" style="color:rgba(255,255,255,.3)">tu turno</span>`
+      ? `<span class="toi-label" style="color:rgba(255,255,255,.3)">${t('toi.you')}</span>`
       : `<span class="toi-current">${curName}</span>`;
     const leftItem  = dir >= 0
-      ? `<span class="toi-item"><span class="toi-arrow">←</span><span class="toi-label toi-prev-label">anterior</span><span class="toi-name toi-prev-name">${prevName}</span></span>`
-      : `<span class="toi-item"><span class="toi-arrow">←</span><span class="toi-label toi-next-label">siguiente</span><span class="toi-name toi-next-name">${nextName}</span></span>`;
+      ? `<span class="toi-item"><span class="toi-arrow">←</span><span class="toi-label toi-prev-label">${t('toi.prev')}</span><span class="toi-name toi-prev-name">${prevName}</span></span>`
+      : `<span class="toi-item"><span class="toi-arrow">←</span><span class="toi-label toi-next-label">${t('toi.next')}</span><span class="toi-name toi-next-name">${nextName}</span></span>`;
     const rightItem = dir >= 0
-      ? `<span class="toi-item"><span class="toi-name toi-next-name">${nextName}</span><span class="toi-label toi-next-label">siguiente</span><span class="toi-arrow">→</span></span>`
-      : `<span class="toi-item"><span class="toi-name toi-prev-name">${prevName}</span><span class="toi-label toi-prev-label">anterior</span><span class="toi-arrow">→</span></span>`;
+      ? `<span class="toi-item"><span class="toi-name toi-next-name">${nextName}</span><span class="toi-label toi-next-label">${t('toi.next')}</span><span class="toi-arrow">→</span></span>`
+      : `<span class="toi-item"><span class="toi-name toi-prev-name">${prevName}</span><span class="toi-label toi-prev-label">${t('toi.prev')}</span><span class="toi-arrow">→</span></span>`;
     toiEl.innerHTML = leftItem + center + rightItem;
     toiEl.classList.remove('hidden');
   } else {
@@ -1338,7 +1396,7 @@ function renderLog(state) {
                 : msg.includes('¡UNO! 🎴') ? ' log-uno-call'
                 : /intercambi/.test(msg) ? ' log-swap'
                 : '';
-      return `<div class="log-entry${cls}">${colorizeLog(msg)}</div>`;
+      return `<div class="log-entry${cls}">${colorizeLog(translateLog(msg))}</div>`;
     })
     .join('');
   el.scrollTop = 0;
@@ -1435,7 +1493,7 @@ function renderChatPanel(state) {
     playersEl.innerHTML = players.map(p => {
       const isMe = p.id === localUid;
       const dc = p.disconnected;
-      return `<span class="chat-player-chip ${dc ? 'dc' : ''}">${esc(p.name)}${isMe ? ' (yo)' : ''}</span>`;
+      return `<span class="chat-player-chip ${dc ? 'dc' : ''}">${esc(p.name)}${isMe ? ' ' + t('chat.me') : ''}</span>`;
     }).join('');
   }
 
@@ -1490,8 +1548,8 @@ function toggleNotifications() {
           notifAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
           notifAudioCtx.resume();
         } catch (_) {}
-        try { new Notification('🔔 Notificaciones activadas', { body: 'Recibirás avisos del juego.', tag: 'notif-test' }); } catch (_) {}
-        showVoiceToast('🔔 Notificaciones activadas');
+        try { new Notification(t('nt.on'), { body: t('nt.onBody'), tag: 'notif-test' }); } catch (_) {}
+        showVoiceToast(t('nt.on'));
       }
     });
   } else {
@@ -1506,7 +1564,7 @@ function updateNotifButton() {
   if (!btn) return;
   const active = notifEnabled && Notification.permission === 'granted';
   btn.classList.toggle('notif-active', active);
-  btn.title = active ? 'Desactivar notificaciones' : 'Activar notificaciones';
+  btn.title = active ? t('nt.disable') : t('nt.enable');
   btn.textContent = active ? '🔔' : '🔕';
 }
 
@@ -1692,7 +1750,7 @@ function updateMusicButton() {
   const btn = document.getElementById('music-toggle-btn');
   if (!btn) return;
   btn.textContent = musicPlaying ? '🎵' : '🔇';
-  btn.title = musicPlaying ? 'Silenciar música' : 'Activar música';
+  btn.title = musicPlaying ? t('mu.mute') : t('mu.play');
   btn.classList.toggle('music-active', musicPlaying);
 }
 
@@ -1942,23 +2000,23 @@ function openSpotifyModal() {
             <div class="spotify-modal-track-artist">${esc(track.artist)}</div>
           </div>
         </div>`
-      : `<p class="spotify-modal-desc">Sin reproducción activa ahora mismo.</p>`;
+      : `<p class="spotify-modal-desc">${t('sp.nothing')}</p>`;
     card.innerHTML = `
       ${SPOTIFY_SVG_LARGE}
-      <div class="spotify-modal-connected">● Conectado a Spotify</div>
+      <div class="spotify-modal-connected">● ${t('sp.connected')}</div>
       ${trackHTML}
       <div class="spotify-modal-btns">
-        <button class="btn btn-ghost btn-sm" onclick="disconnectSpotify()">Desconectar</button>
-        <button class="btn btn-primary btn-sm" onclick="closeSpotifyModal()">Cerrar</button>
+        <button class="btn btn-ghost btn-sm" onclick="disconnectSpotify()">${t('ui.disconnect')}</button>
+        <button class="btn btn-primary btn-sm" onclick="closeSpotifyModal()">${t('ui.close')}</button>
       </div>`;
   } else {
     card.innerHTML = `
       ${SPOTIFY_SVG_LARGE}
-      <h3 class="spotify-modal-title">Conectar Spotify</h3>
-      <p class="spotify-modal-desc">Comparte lo que estás escuchando con los demás jugadores. Aparecerá en la barra superior.</p>
+      <h3 class="spotify-modal-title">${t('sp.connectTitle')}</h3>
+      <p class="spotify-modal-desc">${t('sp.desc')}</p>
       <div class="spotify-modal-btns">
-        <button class="btn spotify-connect-btn btn-sm" onclick="initiateSpotifyAuth()">Conectar cuenta</button>
-        <button class="btn btn-ghost btn-sm" onclick="closeSpotifyModal()">Cancelar</button>
+        <button class="btn spotify-connect-btn btn-sm" onclick="initiateSpotifyAuth()">${t('sp.connectBtn')}</button>
+        <button class="btn btn-ghost btn-sm" onclick="closeSpotifyModal()">${t('ui.cancel')}</button>
       </div>`;
   }
   document.getElementById('spotify-modal').classList.remove('hidden');
@@ -1976,7 +2034,7 @@ function updateSpotifyButton() {
   const btn = document.getElementById('spotify-btn');
   if (!btn) return;
   btn.classList.toggle('spotify-active', isSpotifyConnected());
-  btn.title = isSpotifyConnected() ? 'Spotify conectado' : 'Conectar Spotify';
+  btn.title = isSpotifyConnected() ? t('sp.on') : t('sp.connectTitle');
 }
 
 function showSpotifyError(msg) {
@@ -1984,11 +2042,11 @@ function showSpotifyError(msg) {
   if (!card) return;
   card.innerHTML = `
     ${SPOTIFY_SVG_LARGE}
-    <h3 class="spotify-modal-title">Error de Spotify</h3>
+    <h3 class="spotify-modal-title">${t('sp.errTitle')}</h3>
     <p class="spotify-modal-desc" style="color:var(--color-danger,#e55)">${esc(msg)}</p>
     <div class="spotify-modal-btns">
-      <button class="btn spotify-connect-btn btn-sm" onclick="initiateSpotifyAuth()">Reintentar</button>
-      <button class="btn btn-ghost btn-sm" onclick="closeSpotifyModal()">Cerrar</button>
+      <button class="btn spotify-connect-btn btn-sm" onclick="initiateSpotifyAuth()">${t('ui.retry')}</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeSpotifyModal()">${t('ui.close')}</button>
     </div>`;
   document.getElementById('spotify-modal').classList.remove('hidden');
 }
@@ -2030,7 +2088,7 @@ async function connectLastfm() {
     const res  = await fetch(`${LASTFM_API_BASE}?method=user.getinfo&user=${encodeURIComponent(username)}&api_key=${LASTFM_API_KEY}&format=json`);
     const data = await res.json();
     if (data.error) {
-      if (errEl) errEl.textContent = 'Usuario no encontrado en Last.fm.';
+      if (errEl) errEl.textContent = t('lf.notFound');
       return;
     }
     localStorage.setItem('lastfm_username', data.user.name);
@@ -2038,7 +2096,7 @@ async function connectLastfm() {
     updateLastfmButton();
     openLastfmModal();
   } catch (e) {
-    if (errEl) errEl.textContent = 'Error de conexión. Intenta de nuevo.';
+    if (errEl) errEl.textContent = t('lf.netError');
   }
 }
 
@@ -2094,7 +2152,7 @@ function openLastfmModal() {
   if (username) {
     const raw   = spotifyTracksData[localUid];
     const track = raw?.source === 'lastfm' ? raw : null;
-    const trackLabel = track?.isPlaying ? 'Escuchando ahora' : 'Última escuchada';
+    const trackLabel = track?.isPlaying ? t('lf.now') : t('lf.last');
     const trackHTML = track
       ? `<div class="lastfm-modal-track">
           ${track.albumArt ? `<img class="lastfm-modal-art" src="${esc(track.albumArt)}" alt="">` : ''}
@@ -2104,25 +2162,25 @@ function openLastfmModal() {
             <div class="lastfm-modal-track-artist">${esc(track.artist)}</div>
           </div>
         </div>`
-      : `<p class="lastfm-modal-desc">Sin historial de Last.fm.</p>`;
+      : `<p class="lastfm-modal-desc">${t('lf.none')}</p>`;
     card.innerHTML = `
       ${LASTFM_SVG_LARGE}
-      <div class="lastfm-modal-connected">● Conectado como ${esc(username)}</div>
+      <div class="lastfm-modal-connected">● ${t('lf.as', { name: esc(username) })}</div>
       ${trackHTML}
       <div class="lastfm-modal-btns">
-        <button class="btn btn-ghost btn-sm" onclick="disconnectLastfm()">Desconectar</button>
-        <button class="btn btn-primary btn-sm" onclick="closeLastfmModal()">Cerrar</button>
+        <button class="btn btn-ghost btn-sm" onclick="disconnectLastfm()">${t('ui.disconnect')}</button>
+        <button class="btn btn-primary btn-sm" onclick="closeLastfmModal()">${t('ui.close')}</button>
       </div>`;
   } else {
     card.innerHTML = `
       ${LASTFM_SVG_LARGE}
-      <h3 class="lastfm-modal-title">Conectar Last.fm</h3>
-      <p class="lastfm-modal-desc">Introduce tu usuario de Last.fm para compartir lo que escuchas (funciona con Spotify, Apple Music, Tidal y más).</p>
-      <input id="lastfm-username-input" class="lastfm-username-input" type="text" placeholder="Tu usuario de Last.fm" autocomplete="off" onkeydown="if(event.key==='Enter')connectLastfm()">
+      <h3 class="lastfm-modal-title">${t('lf.connectTitle')}</h3>
+      <p class="lastfm-modal-desc">${t('lf.desc')}</p>
+      <input id="lastfm-username-input" class="lastfm-username-input" type="text" placeholder="${t('lf.placeholder')}" autocomplete="off" onkeydown="if(event.key==='Enter')connectLastfm()">
       <span id="lastfm-input-error" class="lastfm-input-error"></span>
       <div class="lastfm-modal-btns">
-        <button class="btn lastfm-connect-btn btn-sm" onclick="connectLastfm()">Conectar</button>
-        <button class="btn btn-ghost btn-sm" onclick="closeLastfmModal()">Cancelar</button>
+        <button class="btn lastfm-connect-btn btn-sm" onclick="connectLastfm()">${t('lf.connect')}</button>
+        <button class="btn btn-ghost btn-sm" onclick="closeLastfmModal()">${t('ui.cancel')}</button>
       </div>`;
     setTimeout(() => document.getElementById('lastfm-username-input')?.focus(), 50);
   }
@@ -2143,7 +2201,7 @@ function updateLastfmButton() {
   btn.classList.toggle('lastfm-active', isLastfmConnected());
   btn.title = isLastfmConnected()
     ? `Last.fm: ${localStorage.getItem('lastfm_username')}`
-    : 'Conectar Last.fm';
+    : t('lf.connectTitle');
 }
 
 function notify(title, body) {
@@ -2165,31 +2223,31 @@ function checkNotifications(state) {
 
   if (prev.status === 'lobby' && state.status === 'playing') {
     const first = state.players[state.currentPlayerIndex];
-    notify('¡La partida comenzó!', `${first?.name || '?'} va primero.`);
+    notify(t('nt.started'), t('nt.first', { name: first?.name || '?' }));
     return;
   }
   if (prev.status !== 'ended' && state.status === 'ended') {
     const won = state.winner === localUid;
-    notify(won ? '🏆 ¡Ganaste!' : '🃏 Partida terminada',
-           won ? '¡Felicidades!' : `Ganó ${state.winnerName || '?'}`);
+    notify(won ? t('nt.won') : t('nt.over'),
+           won ? t('nt.congrats') : t('nt.whoWon', { name: state.winnerName || '?' }));
     return;
   }
   if (state.status !== 'playing') return;
 
   if (prev.currentPlayerIndex !== state.currentPlayerIndex &&
       state.players[state.currentPlayerIndex]?.id === localUid) {
-    notify('¡Es tu turno!', 'Elige una carta para jugar.');
+    notify(t('nt.yourTurn'), t('nt.yourTurnBody'));
     return;
   }
   if (!prev.challengeOpen && state.challengeOpen && state.lastPlayerId !== localUid) {
     const lp = state.players.find(p => p.id === state.lastPlayerId);
     const c  = state.lastClaimedCard;
     const claimed = c ? `${COLOR_NAME[c.color] || ''} ${VALUE_LABEL[c.value] || ''}`.trim() : '?';
-    notify(`${lp?.name || '?'} jugó una carta`, `Dice que jugó ${claimed}. ¿Lo crees?`);
+    notify(t('nt.played', { name: lp?.name || '?' }), t('nt.claim', { card: FX.cardName(c) }));
     return;
   }
   if (!prev.unoCallRequiredFor && getUnoQueue(state.unoCallRequired).some(r => r.playerId === localUid)) {
-    notify('¡UNO!', '¡Solo te queda 1 carta! Grita UNO antes de que alguien te atrape.');
+    notify(t('fx.uno'), t('nt.uno'));
   }
 }
 
@@ -2199,15 +2257,19 @@ function checkNotifications(state) {
 
 async function selectCard(index) {
   if (!roomState) return;
+  FX.noteHand();   // where my cards are, so the played one flies from its real spot
   if (roomState.wildChallenge) return;
   const myHand = roomState.hands?.[localUid] || [];
   const card = myHand[index];
   if (!card) return;
+  // Guided first game: only the card the lesson asks for (tutorial.js)
+  if (LOCAL_GAME && !tutorialAllowsCard(card)) return;
 
   if (drawnCardState !== null && index === drawnCardState.cardIdx && !drawnCardState.canPlay) return;
 
   if (card.value !== 'wild' && !isLiarCard(card) && !isActualPlayable(card, roomState)) {
-    alert('No puedes jugar esta carta boca arriba. Elige otra o roba.');
+    // In-game warning window instead of the browser's alert() (extras.js)
+    showNotice('✋', t('notice.cantTitle'), t('notice.cantBody'));
     return;
   }
 
@@ -2236,12 +2298,12 @@ async function selectCard(index) {
   </div>`;
 
   if (card.value === 'wild') {
-    document.getElementById('claim-dialog-title').textContent = 'Elige el color del Comodín';
+    document.getElementById('claim-dialog-title').textContent = t('claim.wildTitle');
     document.getElementById('actual-card-preview').classList.add('hidden');
     renderClaimPicker();
     document.getElementById('claim-dialog').classList.remove('hidden');
   } else if (isLiarCard(card)) {
-    document.getElementById('claim-dialog-title').textContent = 'Declara esta carta como…';
+    document.getElementById('claim-dialog-title').textContent = t('claim.title');
     document.getElementById('actual-card-preview').classList.remove('hidden');
     renderClaimPicker();
     document.getElementById('claim-dialog').classList.remove('hidden');
@@ -2259,7 +2321,7 @@ async function selectCard(index) {
 function renderClaimPicker() {
   document.getElementById('claim-color-picker').innerHTML = COLORS.map(c =>
     `<button class="color-btn ${c} ${claimColor === c ? 'selected' : ''}"
-      onclick="setClaimColor('${c}')" title="${COLOR_NAME[c]}"></button>`
+      onclick="setClaimColor('${c}')" title="${colorLabel(c)}"></button>`
   ).join('');
 
   const valuePicker = document.getElementById('claim-value-picker');
@@ -2270,11 +2332,13 @@ function renderClaimPicker() {
     // Wild4 can be declared by any liar card.
     const allowedValues = ALL_VALUES.filter(v => v !== 'wild');
     valuePicker.innerHTML = allowedValues.map(v => {
-      const label = v === 'wild4' ? 'COMODÍN +4' : VALUE_LABEL[v];
+      const label = v === 'wild4' ? t('card.wild4').toUpperCase() : VALUE_LABEL[v];
       return `<button class="value-btn ${claimValue === v ? 'selected' : ''}"
         onclick="setClaimValue('${v}')">${label}</button>`;
     }).join('');
   }
+  // B5: say whether this claim is the truth or a lie (extras.js)
+  if (typeof afterClaimPicker === 'function') afterClaimPicker();
 }
 
 function setClaimColor(color) { claimColor = color; renderClaimPicker(); }
@@ -2309,11 +2373,8 @@ async function confirmPlay() {
     const claimedCard = { color: claimColor, value: claimValue };
 
     if (!isClaimPlayable(claimedCard, roomState)) {
-      alert(
-        `¡Ese anuncio no es válido!\n\n` +
-        `Carta superior: ${COLOR_NAME[roomState.topColor]} ${VALUE_LABEL[roomState.topValue]}\n\n` +
-        `Tu carta debe coincidir por color o valor, o ser un Comodín.`
-      );
+      showNotice('🚫', t('notice.badClaimTitle'),
+        t('notice.badClaimBody', { top: FX.cardName({ color: roomState.topColor, value: roomState.topValue }) }));
       return;
     }
 
@@ -2391,7 +2452,7 @@ async function submitWildCard(cardIndex) {
   const myHand = [...(state.hands?.[localUid] || [])];
   const card = myHand[cardIndex];
   if (!card) return;
-  if (card.color === 'black') { alert('No puedes usar un comodín en esta actividad.'); return; }
+  if (card.color === 'black') { showNotice('🚫', t('wc.noWildTitle'), t('wc.noWild')); return; }
 
   const newHand = myHand.filter((_, i) => i !== cardIndex);
   const newHands = { ...state.hands, [localUid]: newHand };
@@ -2575,7 +2636,7 @@ function renderWildChallenge(state) {
 
   const colorSpan = (c) => {
     const hex = LOG_COLOR_HEX[c] || '#fff';
-    return `<span style="color:${hex};font-weight:700">${COLOR_NAME[c]}</span>`;
+    return `<span style="color:${hex};font-weight:700">${colorLabel(c)}</span>`;
   };
 
   handEl.classList.add('hidden');
@@ -2590,7 +2651,7 @@ function renderWildChallenge(state) {
                 : msg.includes('¡UNO! 🎴') ? ' log-uno-call'
                 : /intercambi/.test(msg) ? ' log-swap'
                 : '';
-      return `<div class="log-entry${cls}">${colorizeLog(msg)}</div>`;
+      return `<div class="log-entry${cls}">${colorizeLog(translateLog(msg))}</div>`;
     }).join('');
   }
 
@@ -2600,8 +2661,8 @@ function renderWildChallenge(state) {
     const needsToSubmit = wc.playersNeeded?.includes(localUid) && wc.chooserId !== localUid;
 
     if (needsToSubmit) {
-      title.innerHTML = `🃏 ${esc(wc.chooserName)} jugó ${rainbowHTML('Comodín')}<br>¡Pon una carta — color ${colorSpan(wc.chosenColor)}!`;
-      body.innerHTML = `<p>Toca una carta de tu mano (no comodines)</p>${table}`;
+      title.innerHTML = `🃏 ${t('wc.played', { name: esc(wc.chooserName), w: rainbowHTML(t('card.wild')) })}<br>${t('wc.putOne', { c: colorSpan(wc.chosenColor) })}`;
+      body.innerHTML = `<p>${t('wc.tapOne')}</p>${table}`;
       const myHand = state.hands?.[localUid] || [];
       handEl.classList.remove('hidden');
       handEl.innerHTML = myHand.map((card, i) => {
@@ -2616,50 +2677,50 @@ function renderWildChallenge(state) {
         </div>`;
       }).join('');
     } else {
-      title.innerHTML = `🃏 Comodín — ${colorSpan(wc.chosenColor)}`;
+      title.innerHTML = `🃏 ${t('card.wild')} — ${colorSpan(wc.chosenColor)}`;
       const waitingNames = (wc.playersNeeded || [])
         .map(id => esc(state.players.find(p => p.id === id)?.name || '?')).join(', ');
       const waitingLine = waitingNames
-        ? `<p style="color:rgba(255,255,255,.45);font-size:.8rem">Esperando: ${waitingNames}</p>` : '';
+        ? `<p style="color:rgba(255,255,255,.45);font-size:.8rem">${t('ch.waiting', { names: waitingNames })}</p>` : '';
       body.innerHTML = `${table}${waitingLine}`;
     }
   }
 
   else if (wc.phase === 'accusing') {
     if (wc.chooserId === localUid) {
-      title.innerHTML = `🎯 ¿Quién tiene ${colorSpan(wc.chosenColor)}?`;
+      title.innerHTML = `🎯 ${t('wc.who', { c: colorSpan(wc.chosenColor) })}`;
       const buttons = wc.accusePool.map(id => {
         const p = state.players.find(pl => pl.id === id);
         return `<button class="btn btn-danger" style="width:100%" onclick="accuseWildPlayer('${id}')">
-          Acusar a ${esc(p?.name || '?')}</button>`;
+          ${t('wc.accuse', { name: esc(p?.name || '?') })}</button>`;
       }).join('');
       body.innerHTML = `${table}<div class="wc-accuse-list">${buttons}</div>`;
     } else {
-      title.innerHTML = `🎯 ${esc(wc.chooserName)} está acusando…`;
+      title.innerHTML = `🎯 ${t('wc.accusing', { name: esc(wc.chooserName) })}`;
       body.innerHTML = table;
     }
   }
 
   else if (wc.phase === 'resolving') {
     const found = state.players.find(p => p.id === wc.foundPlayerId);
-    title.innerHTML = `✅ ¡${esc(found?.name||'?')} tenía ${colorSpan(wc.chosenColor)}!`;
+    title.innerHTML = `✅ ${t('wc.had', { name: esc(found?.name || '?'), c: colorSpan(wc.chosenColor) })}`;
     body.innerHTML = table;
     if (wc.chooserId === localUid) {
-      actions.innerHTML = `<button class="btn btn-primary" onclick="discardWildResolved()">Descartar y elegir color</button>`;
+      actions.innerHTML = `<button class="btn btn-primary" onclick="discardWildResolved()">${t('wc.discard')}</button>`;
     } else {
-      body.innerHTML += `<p style="margin-top:.5rem;color:rgba(255,255,255,.45);font-size:.85rem">Esperando a ${esc(wc.chooserName)}…</p>`;
+      body.innerHTML += `<p style="margin-top:.5rem;color:rgba(255,255,255,.45);font-size:.85rem">${t('wc.waitingFor', { name: esc(wc.chooserName) })}</p>`;
     }
   }
 
   else if (wc.phase === 'choosing') {
     if (wc.chooserId === localUid) {
-      title.innerHTML = `🎨 Elige el color final del ${rainbowHTML('Comodín')}`;
+      title.innerHTML = `🎨 ${t('wc.pickFinal', { w: rainbowHTML(t('card.wild')) })}`;
       const btns = COLORS.map(c =>
-        `<button class="color-btn ${c}" onclick="finalizeWildColor('${c}')" title="${COLOR_NAME[c]}"></button>`
+        `<button class="color-btn ${c}" onclick="finalizeWildColor('${c}')" title="${colorLabel(c)}"></button>`
       ).join('');
       body.innerHTML = `${table}<div class="wc-color-row">${btns}</div>`;
     } else {
-      title.innerHTML = `🎨 ${esc(wc.chooserName)} elige el color final…`;
+      title.innerHTML = `🎨 ${t('wc.picking', { name: esc(wc.chooserName) })}`;
       body.innerHTML = table;
     }
   }
@@ -2676,7 +2737,7 @@ function showSevenSwapDialog(mode) {
   document.getElementById('seven-swap-player-list').innerHTML = others.map(p =>
     `<button class="btn btn-secondary" style="width:100%;padding:.6rem"
       onclick="pickSevenSwapTarget('${p.id}')">
-      ${esc(p.name)} (${p.cardCount} cartas)
+      ${esc(p.name)} (${t('win.cards', { n: p.cardCount })})
     </button>`
   ).join('');
   document.getElementById('seven-swap-cancel-row').classList.toggle('hidden', mode === 'liar');
@@ -3240,8 +3301,8 @@ function showDrawConfirm(accent, icon, title, message, okLabel, cancelLabel, thi
     const okBtn    = document.getElementById('draw-confirm-ok');
     const canBtn   = document.getElementById('draw-confirm-cancel');
     const thirdBtn = document.getElementById('draw-confirm-third');
-    okBtn.textContent  = okLabel     || 'Sí, robar';
-    canBtn.textContent = cancelLabel || 'Cancelar';
+    okBtn.textContent  = okLabel     || t('draw.ok');
+    canBtn.textContent = cancelLabel || t('ui.cancel');
     if (thirdLabel) {
       thirdBtn.textContent = thirdLabel;
       thirdBtn.classList.remove('hidden');
@@ -3266,6 +3327,7 @@ function showDrawConfirm(accent, icon, title, message, okLabel, cancelLabel, thi
 }
 
 async function handleDraw() {
+  if (LOCAL_GAME) return;   // the guided game never needs a draw
   const state = roomState;
   if (!isMyTurn(state) || state.challengeOpen || state.wildChallenge) return;
   if (drawnCardState !== null) return;
@@ -3277,22 +3339,22 @@ async function handleDraw() {
   if (hasGenuine) {
     const ok = await showDrawConfirm(
       'white', '✋',
-      'Tienes cartas jugables',
-      'Tienes cartas que puedes jugar en este turno. ¿Quieres robar de todas formas?'
+      t('draw.t1'),
+      t('draw.m1')
     );
     if (!ok) return;
   } else if (!hasGenuine && hasMatchingLiar) {
     const ok = await showDrawConfirm(
       'yellow', '🃏',
-      '¡Tienes cartas jugables!',
-      'Tienes cartas de mentira que coinciden con el descarte y puedes jugarlas. ¿Seguro que quieres robar de todas formas?'
+      t('draw.t2'),
+      t('draw.m2')
     );
     if (!ok) return;
   } else if (!hasGenuine && !hasMatchingLiar && hasAnyLiar) {
     const ok = await showDrawConfirm(
       'red', '🎴',
-      'Solo tienes cartas de mentira',
-      'No tienes cartas jugables honestamente, pero puedes jugar una carta de mentira. ¿Quieres robar de todas formas?'
+      t('draw.t3'),
+      t('draw.m3')
     );
     if (!ok) return;
   }
@@ -3483,12 +3545,13 @@ async function handleLeaveLobby() {
 }
 
 async function handleLeaveGame() {
+  if (LOCAL_GAME) { endTutorial(); return; }
   if (!roomState || !currentRoomId) { showScreen('landing'); return; }
   const ok = await showDrawConfirm(
     'red', '🚪',
-    '¿Seguro que quieres salir?',
-    'Si sales ahora no podrás ver la puntuación final ni serás incluido en el marcador. Si quieres terminar la partida y ver los resultados, vota para finalizar.',
-    'Salir', 'Quedarme', 'Votar Terminar'
+    t('g.leaveQ'),
+    t('g.leaveBody'),
+    t('g.leave'), t('g.stay'), t('g.voteEnd')
   );
   if (ok === 'third') { handleEndGameVote(); return; }
   if (!ok) return;
@@ -3579,7 +3642,7 @@ async function handleEndGameVote() {
     });
   } else {
     const log = addLog(state.log,
-      `${localName} propone terminar (${votes.length + 1}/${state.players.filter(p => !p.disconnected).length}).`);
+      `${localName} propone terminar (${votes.length + 1}/${state.players.filter(p => !p.disconnected && !p.isAI).length}).`);
     await db.collection('rooms').doc(currentRoomId).update({
       endVotes: firebase.firestore.FieldValue.arrayUnion(localUid),
       log,
@@ -3595,11 +3658,11 @@ function renderEndVoteStatus(state) {
   const hasVoted = votes.includes(localUid);
 
   statusEl.textContent = votes.length > 0
-    ? `${votes.length}/${state.players.filter(p => !p.disconnected).length} quieren terminar`
+    ? t('g.votes', { n: votes.length, t: state.players.filter(p => !p.disconnected && !p.isAI).length })
     : '';
 
   if (btn) {
-    btn.textContent = hasVoted ? 'Retirar voto' : 'Terminar';
+    btn.textContent = hasVoted ? t('g.withdraw') : t('g.end');
     btn.classList.toggle('btn-voted', hasVoted);
   }
 }
@@ -3618,14 +3681,13 @@ function renderWinner(state) {
   document.getElementById('winner-error')?.classList.add('hidden');
 
   if (reason === 'vote') {
-    titleEl.textContent = '🤝 ¡Partida terminada!';
-    const winLabel = state.winCondition === 'points' ? 'ganó con menos puntos' : 'ganó con menos cartas';
-    nameEl.textContent  = `${state.winnerName || '?'} ${winLabel}`;
+    titleEl.textContent = t('w.vote');
+    nameEl.textContent  = t(state.winCondition === 'points' ? 'w.byPoints' : 'w.byCards', { name: state.winnerName || '?' });
   } else if (reason === 'lastPlayer') {
-    titleEl.textContent = '🏆 ¡Último en pie!';
+    titleEl.textContent = t('w.last');
     nameEl.textContent  = state.winnerName || '?';
   } else {
-    titleEl.textContent = '🎉 ¡Ganador!';
+    titleEl.textContent = t('w.winner');
     nameEl.textContent  = state.winnerName || '?';
   }
 
@@ -3635,13 +3697,16 @@ function renderWinner(state) {
       `<div class="standing-row ${s.id === state.winner ? 'winner-row' : ''}">
         <span class="standing-rank">#${i + 1}</span>
         <span class="standing-name">${esc(s.name)}</span>
-        <span class="standing-stats">${s.cards} cartas · ${s.points} pts</span>
+        <span class="standing-stats">${t('win.cards', { n: s.cards })} · ${s.points} pts</span>
       </div>`
     ).join('');
     standingsEl.classList.remove('hidden');
   } else {
     standingsEl.classList.add('hidden');
   }
+
+  // Confetti, everyone's cards left, awards, room score, my stats + badges (extras.js)
+  if (typeof afterWinnerRender === 'function') afterWinnerRender(state);
 }
 
 function showJoinAnother() {
@@ -3650,14 +3715,14 @@ function showJoinAnother() {
 
 async function handleJoinAnother() {
   const code = document.getElementById('winner-room-code').value.trim().toUpperCase();
-  if (code.length !== 6) { showWinnerError('Introduce el código de sala de 6 caracteres'); return; }
-  if (!localUid) { showWinnerError('Aún conectando… intenta de nuevo'); return; }
+  if (code.length !== 6) { showWinnerError(t('err.code')); return; }
+  if (!localUid) { showWinnerError(t('err.connecting')); return; }
 
   const snap = await db.collection('rooms').doc(code).get();
-  if (!snap.exists) { showWinnerError('Sala no encontrada'); return; }
+  if (!snap.exists || snap.data()?.game) { showWinnerError(t('err.notFound')); return; }
   const data = snap.data();
-  if (data.status !== 'lobby') { showWinnerError('La partida ya comenzó'); return; }
-  if (data.players.length >= 10) { showWinnerError('Sala llena (máximo 10)'); return; }
+  if (data.status !== 'lobby') { showWinnerError(t('err.started')); return; }
+  if (data.players.length >= 10) { showWinnerError(t('err.full', { n: 10 })); return; }
 
   if (roomUnsub) { roomUnsub(); roomUnsub = null; }
 
@@ -3712,7 +3777,7 @@ function scheduleAiAction(fn) {
   aiThinking = true;
   const delay = 700 + Math.random() * 900;
   setTimeout(async () => {
-    try { await fn(); }
+    try { if (currentRoomId) await fn(); }   // (the room may have been left meanwhile)
     catch (e) { console.error('[AI]', e); }
     finally {
       aiThinking = false;
@@ -3726,6 +3791,8 @@ function maybeRunAI(state) {
   if (state.hostId !== localUid) return;
   if (aiThinking) return;
   if (state.status !== 'playing') return;
+  // Guided first game: the Profe follows the lesson script (tutorial.js)
+  if (typeof LOCAL_GAME !== 'undefined' && LOCAL_GAME) { tutorialBotTurn(state); return; }
 
   const wc = state.wildChallenge;
   if (wc) {
@@ -3772,9 +3839,10 @@ function maybeRunAI(state) {
 
   const unoReqs = getUnoQueue(state.unoCallRequired);
   if (unoReqs.length > 0) {
-    // Bot yells for itself with ~85% reliability (occasionally forgets)
+    // Bot yells for itself — how reliably depends on the bot level (G2)
+    const lvl = BOT_LEVELS[state.botLevel] || BOT_LEVELS.normal;
     const selfReq = unoReqs.find(r => state.players.find(p => p.id === r.playerId && p.isAI));
-    if (selfReq && Math.random() < 0.85) {
+    if (selfReq && Math.random() < lvl.unoCall) {
       const aiOwner = state.players.find(p => p.id === selfReq.playerId);
       scheduleAiAction(() => aiCallUno(state, aiOwner));
       return;
@@ -3783,7 +3851,7 @@ function maybeRunAI(state) {
     const catchTarget = selfReq ?? unoReqs.find(r => !state.players.find(p => p.id === r.playerId)?.isAI);
     if (catchTarget) {
       const eligibleCatchers = state.players.filter(p => p.isAI && p.id !== catchTarget.playerId && !p.disconnected);
-      if (eligibleCatchers.length > 0 && Math.random() < 0.65) {
+      if (eligibleCatchers.length > 0 && Math.random() < lvl.unoCatch) {
         const catcher = eligibleCatchers[Math.floor(Math.random() * eligibleCatchers.length)];
         scheduleAiAction(() => aiCatchUno(state, catcher, catchTarget));
         return;
@@ -3797,6 +3865,41 @@ function maybeRunAI(state) {
     scheduleAiAction(() => aiTakeTurn(state, currentPlayer));
   }
 }
+
+// ---- Bot personalities and levels (idea G2) ----
+// Each bot gets a personality when it's added (its name shows it):
+//   honest — how often it tells the truth when it plays a face-down card
+//   doubt  — added to its chance of shouting "¡Mentira!"
+// The host picks the level for all bots in the lobby (room.botLevel):
+//   unoCall  — chance a bot remembers to shout UNO for itself
+//   unoCatch — chance a bot catches someone who forgot
+//   doubt    — added to every bot's chance of accusing
+//   smart    — hard bots get suspicious when they hold the card being claimed
+const BOT_PERSONAS = {
+  honest:  { name: 'El Honesto',    icon: '😇', honest: .95, doubt: -.10 },
+  liar:    { name: 'Pinocho',       icon: '🤥', honest: .20, doubt:  .00 },
+  sherlock:{ name: 'Sherlock',      icon: '🕵️', honest: .55, doubt:  .25 },
+  naive:   { name: 'Doña Confiada', icon: '🙈', honest: .60, doubt: -.20 },
+  shark:   { name: 'El Tahúr',      icon: '🎩', honest: .45, doubt:  .10 }
+};
+const BOT_ORDER = ['liar', 'sherlock', 'shark', 'naive', 'honest'];
+const BOT_LEVELS = {
+  easy:   { unoCall: .6,  unoCatch: .35, doubt: -.12, smart: false },
+  normal: { unoCall: .85, unoCatch: .65, doubt:  0,   smart: false },
+  hard:   { unoCall: 1,   unoCatch: .9,  doubt:  .05, smart: true }
+};
+function pickBotPersona(players) {
+  const used = new Set(players.filter(p => p.isAI).map(p => p.persona));
+  return BOT_ORDER.find(k => !used.has(k)) || BOT_ORDER[players.length % BOT_ORDER.length];
+}
+// A new bot with the next free personality; its name shows who it is
+function makeBot(players) {
+  const persona = pickBotPersona(players);
+  const P = BOT_PERSONAS[persona];
+  const name = getUniqueName(`${P.icon} ${P.name}`, players);
+  return { id: 'ai-' + Math.random().toString(36).slice(2, 9), name, cardCount: 0, isAI: true, persona };
+}
+const personaOf = p => BOT_PERSONAS[p?.persona] || { honest: .55, doubt: 0 };
 
 // ---- Decision helpers ----
 
@@ -3850,7 +3953,7 @@ async function aiTakeTurn(state, aiPlayer) {
     const { card, idx } = liarCandidates[Math.floor(Math.random() * liarCandidates.length)];
     const honestClaim   = { color: card.color === 'black' ? aiChooseColor(hand) : card.color, value: card.value };
     const honestOk      = isClaimPlayable(honestClaim, state);
-    const useHonest     = honestOk && Math.random() < 0.55;
+    const useHonest     = honestOk && Math.random() < personaOf(aiPlayer).honest;
     const claimedCard   = useHonest ? honestClaim : aiBuildBluffClaim(state);
     await aiDoPlayCard(state, aiId, aiName, card, claimedCard, idx);
     return;
@@ -4060,6 +4163,16 @@ async function aiChallengeOrBelieve(state, aiPlayer) {
   if (lpCards <= 2) challengeProb = 0.50;
   if (lpCards === 1) challengeProb = 0.65;
   if (state.lastClaimedCard?.value === 'wild4') challengeProb += 0.15;
+
+  // Personality and level (G2)
+  const lvl = BOT_LEVELS[state.botLevel] || BOT_LEVELS.normal;
+  challengeProb += personaOf(aiPlayer).doubt + lvl.doubt;
+  // Hard bots count cards: holding the very card being claimed makes it less likely
+  const c = state.lastClaimedCard;
+  if (lvl.smart && c && (state.hands?.[aiId] || []).some(h => h.value === c.value && (c.value === 'wild4' || h.color === c.color))) {
+    challengeProb += 0.3;
+  }
+  challengeProb = Math.max(0.03, Math.min(0.95, challengeProb));
 
   if (Math.random() < challengeProb) {
     await aiExecuteChallenge(state, aiId, aiName);
@@ -4512,7 +4625,7 @@ async function joinVoice() {
       video: false,
     });
   } catch (e) {
-    showVoiceToast('No se pudo acceder al micrófono');
+    showVoiceToast(t('vc.noMic'));
     return;
   }
 
@@ -4751,14 +4864,14 @@ function updateVoiceButton() {
   btn.classList.remove('voice-active', 'voice-muted', 'voice-self-speaking');
   if (voiceState === 'off') {
     btn.textContent = '🎤';
-    btn.title = 'Unirse al chat de voz';
+    btn.title = t('vc.join');
   } else if (voiceState === 'on') {
     btn.textContent = '🎤';
-    btn.title = 'Silenciar micrófono';
+    btn.title = t('vc.mute');
     btn.classList.add('voice-active');
   } else {
     btn.textContent = '🔇';
-    btn.title = 'Salir del chat de voz';
+    btn.title = t('vc.leave');
     btn.classList.add('voice-muted');
   }
 }

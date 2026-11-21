@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- App icon (Y2): a red card behind a dark liar card with a mask, on the table blue.
+       Full-bleed square so phones can crop it to a circle or rounded square. -->
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="75%"><stop offset="0" stop-color="#1e3a7a"/><stop offset="1" stop-color="#0d1e42"/></radialGradient>
+    <linearGradient id="dark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3a0d12"/><stop offset="1" stop-color="#08122e"/></linearGradient>
+  </defs>
+  <rect width="100" height="100" fill="url(#bg)"/>
+  <g transform="rotate(-14 50 55)">
+    <rect x="22" y="22" width="36" height="54" rx="6" fill="#C81515" stroke="#fff" stroke-opacity=".55" stroke-width="2"/>
+    <text x="40" y="58" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="24" text-anchor="middle" fill="#fff">7</text>
+  </g>
+  <g transform="rotate(10 50 55)">
+    <rect x="42" y="24" width="36" height="54" rx="6" fill="url(#dark)" stroke="#e8eeff" stroke-width="2.4"/>
+    <rect x="46" y="28" width="28" height="46" rx="4" fill="none" stroke="#fff" stroke-opacity=".45" stroke-dasharray="3 2"/>
+    <path d="M46 46l-3-3M74 46l3-3" stroke="#E8B800" stroke-width="2" stroke-linecap="round"/>
+    <path d="M45 45c5-4 11-4 15 1 4-5 10-5 15-1 0 9-5 13-10 11l-5-3-5 3c-5 2-10-2-10-11z" fill="#E8B800"/>
+    <ellipse cx="53" cy="49.5" rx="3.6" ry="2.6" fill="#08122e"/><ellipse cx="67" cy="49.5" rx="3.6" ry="2.6" fill="#08122e"/>
+  </g>
+</svg>
