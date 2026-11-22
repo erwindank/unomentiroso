@@ -370,7 +370,7 @@ const FX = (() => {
     } else if (!prev.challengeOpen && !cur.challengeOpen &&
                (prev.topColor !== cur.topColor || prev.topValue !== cur.topValue)) {
       // A face-up play (or the colour chosen at the end of a wild card)
-      const colorPick = has(/elige el color final|eligió el color/);
+      const colorPick = has(/elige el color final|eligió el color|El Comodín se queda en/);
       if (prev.topValue !== cur.topValue || !colorPick) {
         const pid = prev.players[prev.currentPlayerIndex]?.id;
         ev.push({ type: 'play', pid, card: { color: cur.topColor, value: cur.topValue, liar: false },

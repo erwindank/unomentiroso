@@ -123,11 +123,10 @@ function createDeck() {
       deck.push({ color, value: a, liar: true });
     }
   }
-  // Wild = normal (played face-up, pick a color); wild4 = liar card
-  for (let i = 0; i < 4; i++) {
-    deck.push({ color: 'black', value: 'wild',  liar: false });
-    deck.push({ color: 'black', value: 'wild4', liar: true });
-  }
+  // Like the real Liar's UNO box: 6 Wild Liar's Challenge cards (normal, always
+  // played face up) and 2 Wild Draw Four cards (liar cards). 112 cards in all.
+  for (let i = 0; i < 6; i++) deck.push({ color: 'black', value: 'wild',  liar: false });
+  for (let i = 0; i < 2; i++) deck.push({ color: 'black', value: 'wild4', liar: true });
   return deck;
 }
 
@@ -239,6 +238,25 @@ function determineWinner(state) {
   const winCondition = (second && first.cards === second.cards) ? 'points' : 'cards';
   return { winner: first.id, winnerName: first.name, winCondition };
 }
+
+// Everyone who won this game. Usually one player; several when they went out
+// together (shared win). Ignores a stale `winners` list from an older game.
+function winnerIds(state) {
+  const w = state?.winners;
+  if (Array.isArray(w) && w.includes(state.winner)) return w;
+  return state?.winner ? [state.winner] : [];
+}
+
+// Official scoring: the winner(s) score the points of every card left in the
+// other players' hands. Only for games won by going out (not ended by a vote).
+function roundPoints(state) {
+  if (!state || state.winnerReason === 'vote' || state.winnerReason === 'lastPlayer') return 0;
+  const ids = winnerIds(state);
+  if (!ids.length) return 0;
+  return (state.players || []).filter(p => !ids.includes(p.id))
+    .reduce((n, p) => n + handPoints(state.hands?.[p.id]), 0);
+}
+const MATCH_POINTS = 500;   // first to 500 points wins the match
 
 function isActualPlayable(card, state) {
   if (!state || !card) return false;
@@ -486,6 +504,7 @@ async function handleCreate() {
     log: [],
     winner: null,
     winnerName: null,
+    winners: null,
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     lastActivity: firebase.firestore.FieldValue.serverTimestamp()
   });
@@ -573,7 +592,7 @@ async function handleJoin() {
       // New player joining mid-game: deal 7 cards from the draw pile
       if (data.players.length >= 10) { showLandingError(t('err.full', { n: 10 })); return; }
       const uniqueName = getUniqueName(name, data.players);
-      const { drawn, newDrawPile } = takeCards(data.drawPile, 7);
+      const { drawn, newDrawPile } = takeCards(data.drawPile, 7, data.hands, data);
       localName = uniqueName;
       await db.collection('rooms').doc(code).update({
         players: firebase.firestore.FieldValue.arrayUnion({ id: localUid, name: uniqueName, cardCount: 7 }),
@@ -987,9 +1006,12 @@ async function handleStart() {
     log: [`¡Partida iniciada! ${esc(players[0].name)} va primero.`],
     winner: null,
     winnerName: null,
+    winners: null,
     winnerReason: null,
     endVotes: [],
     stats: {},   // match counts for the awards (extras.js)
+    // A match ends when someone reaches 500 points; the next game starts a new match
+    ...(roomState.matchWinner ? { points: {}, matchWinner: null } : {}),
     gameNo: (roomState.gameNo || 0) + 1,   // which game in this room (room score, extras.js)
     seriesDone: false,
     lastActivity: firebase.firestore.FieldValue.serverTimestamp()
@@ -1185,7 +1207,7 @@ async function handleUnoCallBtn() {
       } else {
         // Catching another player
         let { hands, players, drawPile } = state;
-        const { drawn, newDrawPile } = takeCards(drawPile, 2);
+        const { drawn, newDrawPile } = takeCards(drawPile, 2, hands, state);
         hands   = { ...hands, [req.playerId]: [...(hands[req.playerId] || []), ...drawn] };
         players = players.map(p =>
           p.id === req.playerId ? { ...p, cardCount: hands[p.id].length } : p
@@ -1324,8 +1346,9 @@ function renderHand(state) {
     if (inDrawMode) {
       const isDrawn = i === drawnCardState.cardIdx;
       if (isDrawn) extraClass = ' drawn-fresh';
-      isPlayable = myTurn;
-      onclick = myTurn ? `selectCard(${i})` : '';
+      // Only the freshly drawn card can be played now; the rest wait for next turn
+      isPlayable = myTurn && isDrawn && drawnCardState.canPlay;
+      onclick = isPlayable ? `selectCard(${i})` : '';
     } else {
       isPlayable = myTurn;
       onclick = myTurn ? `selectCard(${i})` : '';
@@ -2227,7 +2250,7 @@ function checkNotifications(state) {
     return;
   }
   if (prev.status !== 'ended' && state.status === 'ended') {
-    const won = state.winner === localUid;
+    const won = winnerIds(state).includes(localUid);
     notify(won ? t('nt.won') : t('nt.over'),
            won ? t('nt.congrats') : t('nt.whoWon', { name: state.winnerName || '?' }));
     return;
@@ -2265,7 +2288,8 @@ async function selectCard(index) {
   // Guided first game: only the card the lesson asks for (tutorial.js)
   if (LOCAL_GAME && !tutorialAllowsCard(card)) return;
 
-  if (drawnCardState !== null && index === drawnCardState.cardIdx && !drawnCardState.canPlay) return;
+  // After drawing, only the card you just drew may be played (official rule)
+  if (drawnCardState !== null && (index !== drawnCardState.cardIdx || !drawnCardState.canPlay)) return;
 
   if (card.value !== 'wild' && !isLiarCard(card) && !isActualPlayable(card, roomState)) {
     // In-game warning window instead of the browser's alert() (extras.js)
@@ -2452,7 +2476,7 @@ async function submitWildCard(cardIndex) {
   const myHand = [...(state.hands?.[localUid] || [])];
   const card = myHand[cardIndex];
   if (!card) return;
-  if (card.color === 'black') { showNotice('🚫', t('wc.noWildTitle'), t('wc.noWild')); return; }
+  // Any card may go down; a card of another colour (or a wild) is simply a lie
 
   const newHand = myHand.filter((_, i) => i !== cardIndex);
   const newHands = { ...state.hands, [localUid]: newHand };
@@ -2498,7 +2522,7 @@ async function accuseWildPlayer(targetId) {
   const newFlipped = { ...(wc.flippedCards || {}), [targetId]: { card: submitted, result: hasColor ? 'correct' : 'wrong' } };
 
   if (!hasColor) {
-    const { drawn, newDrawPile } = takeCards(drawPile, 1);
+    const { drawn, newDrawPile } = takeCards(drawPile, 1, hands, state);
     drawPile = newDrawPile;
     hands = { ...hands, [targetId]: [...(hands[targetId] || []), submitted, ...drawn] };
     players = players.map(p => p.id === targetId ? { ...p, cardCount: hands[p.id].length } : p);
@@ -2562,37 +2586,48 @@ async function discardWildResolved() {
   });
 }
 
-async function finalizeWildColor(color) {
-  const state = roomState;
-  const wc = state.wildChallenge;
-  if (!wc || wc.phase !== 'choosing') return;
-  if (wc.chooserId !== localUid) return;
-
-  const myFinalHand = state.hands?.[localUid] || [];
-  const won = myFinalHand.length === 0;
-
-  const log = addLog(state.log, `${localName} elige el color final: ${COLOR_NAME[color]}.`);
+// Ends a wild challenge. Official rule: the colour stays the one named when the
+// Wild was played (no second pick). Anyone whose last card went down and was
+// kept (told the truth or was never accused) has gone out and wins; the Wild's
+// player comes first if both happened.
+function wildChallengeEndUpdate(state, wc) {
+  const color = wc.chosenColor;
+  const log = addLog(state.log, `El Comodín se queda en ${COLOR_NAME[color]}.`);
   const update = {
     topColor: color, topValue: 'wild',
     currentPlayerIndex: wc.nextPlayerIndex,
     wildChallenge: firebase.firestore.FieldValue.delete(),
     log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
   };
+  const empty = id => (state.hands?.[id] || []).length === 0;
+  // Everyone who went out together shares the win (official rule). The Wild's
+  // player is listed first so the single `winner` field stays meaningful.
+  const outPlayers = state.players.filter(p => empty(p.id))
+    .sort((a, b) => (b.id === wc.chooserId) - (a.id === wc.chooserId));
+  const winner = outPlayers[0] || null;
 
-  const unoEntries = won ? [] : state.players
+  const unoEntries = winner ? [] : state.players
     .filter(p => (state.hands?.[p.id] || []).length === 1)
     .map(p => ({ playerId: p.id, playerName: p.name }));
   update.unoCallRequired = unoEntries.length > 0
     ? unoEntries
     : firebase.firestore.FieldValue.delete();
 
-  if (won) {
+  if (winner) {
     update.status = 'ended';
-    update.winner = localUid;
-    update.winnerName = localName;
+    update.winner = winner.id;
+    update.winnerName = outPlayers.map(p => p.name).join(' & ');
+    update.winners = outPlayers.map(p => p.id);   // >1 = a shared win
   }
+  return update;
+}
 
-  await db.collection('rooms').doc(currentRoomId).update(update);
+async function finalizeWildColor() {
+  const state = roomState;
+  const wc = state.wildChallenge;
+  if (!wc || wc.phase !== 'choosing') return;
+  if (wc.chooserId !== localUid) return;
+  await db.collection('rooms').doc(currentRoomId).update(wildChallengeEndUpdate(state, wc));
 }
 
 function buildWcCardTable(wc, state) {
@@ -2666,7 +2701,7 @@ function renderWildChallenge(state) {
       const myHand = state.hands?.[localUid] || [];
       handEl.classList.remove('hidden');
       handEl.innerHTML = myHand.map((card, i) => {
-        const disabled = card.color === 'black';
+        const disabled = false;   // every card may go down (wilds count as a lie)
         const lbl = VALUE_LABEL[card.value];
         const center = WILDS.includes(card.value) ? wildCenterHTML(card.value)
           : card.value === 'reverse' ? reverseCenterHTML()
@@ -2714,13 +2749,11 @@ function renderWildChallenge(state) {
 
   else if (wc.phase === 'choosing') {
     if (wc.chooserId === localUid) {
-      title.innerHTML = `🎨 ${t('wc.pickFinal', { w: rainbowHTML(t('card.wild')) })}`;
-      const btns = COLORS.map(c =>
-        `<button class="color-btn ${c}" onclick="finalizeWildColor('${c}')" title="${colorLabel(c)}"></button>`
-      ).join('');
-      body.innerHTML = `${table}<div class="wc-color-row">${btns}</div>`;
+      // The colour was already named when the Wild was played — just finish
+      title.innerHTML = `🎨 ${t('wc.pickFinal', { w: rainbowHTML(t('card.wild')), c: colorSpan(wc.chosenColor) })}`;
+      body.innerHTML = `${table}<div class="wc-color-row"><button class="btn btn-primary" onclick="finalizeWildColor()">${t('wc.finish')}</button></div>`;
     } else {
-      title.innerHTML = `🎨 ${t('wc.picking', { name: esc(wc.chooserName) })}`;
+      title.innerHTML = `🎨 ${t('wc.picking', { name: esc(wc.chooserName), c: colorSpan(wc.chosenColor) })}`;
       body.innerHTML = table;
     }
   }
@@ -2841,7 +2874,7 @@ async function executeSevenSwap(targetId) {
 
   const penaltyDraw = state.pendingPenaltyDraw;
   if (penaltyDraw) {
-    const { drawn, newDrawPile } = takeCards(drawPile, penaltyDraw.count);
+    const { drawn, newDrawPile } = takeCards(drawPile, penaltyDraw.count, hands, state);
     const pid = penaltyDraw.playerId;
     update.hands = { ...update.hands, [pid]: [...(update.hands[pid] || []), ...drawn] };
     update.players = update.players.map(p => p.id === pid ? { ...p, cardCount: update.hands[p.id].length } : p);
@@ -2997,7 +3030,7 @@ async function handleChallenge() {
 
     if (isLie) {
       // El mentiroso recupera la carta jugada y roba 1 carta del mazo
-      const { drawn, newDrawPile } = takeCards(drawPile, 1);
+      const { drawn, newDrawPile } = takeCards(drawPile, 1, hands, state);
       hands = { ...hands, [state.lastPlayerId]: [...(hands[state.lastPlayerId] || []), actual, ...drawn] };
       players = players.map(p =>
         p.id === state.lastPlayerId ? { ...p, cardCount: hands[p.id].length } : p
@@ -3029,7 +3062,7 @@ async function handleChallenge() {
       const lastPlayerWon = (hands?.[state.lastPlayerId] || []).length === 0;
       if (lastPlayerWon) {
         // Last card was the truth — give accuser the penalty draw then end the game
-        const { drawn, newDrawPile } = takeCards(drawPile, 1);
+        const { drawn, newDrawPile } = takeCards(drawPile, 1, hands, state);
         const newHands = { ...hands, [localUid]: [...(hands[localUid] || []), ...drawn] };
         const newPlayers = players.map(p =>
           p.id === localUid ? { ...p, cardCount: newHands[p.id].length } : p
@@ -3054,7 +3087,7 @@ async function handleChallenge() {
 
       } else if (claimed.value === '0') {
         // Rotate hands first, then add drawn card to localUid's new (received) hand
-        const { drawn, newDrawPile } = takeCards(drawPile, 1);
+        const { drawn, newDrawPile } = takeCards(drawPile, 1, hands, state);
         const advanced = applyEffectsAndAdvance({ ...state, hands, players, drawPile: newDrawPile });
         const postHands = { ...advanced.changes.hands, [localUid]: [...(advanced.changes.hands[localUid] || []), ...drawn] };
         const postPlayers = advanced.changes.players.map(p =>
@@ -3092,7 +3125,7 @@ async function handleChallenge() {
 
       } else {
         // Default: draw first, then apply effects
-        const { drawn, newDrawPile } = takeCards(drawPile, 1);
+        const { drawn, newDrawPile } = takeCards(drawPile, 1, hands, state);
         hands = { ...hands, [localUid]: [...(hands[localUid] || []), ...drawn] };
         players = players.map(p =>
           p.id === localUid ? { ...p, cardCount: hands[p.id].length } : p
@@ -3259,7 +3292,7 @@ function applyEffectsAndAdvance(state) {
 
     case 'draw2': {
       const tid = players[nextIdx].id;
-      const { drawn, newDrawPile } = takeCards(drawPile, 2);
+      const { drawn, newDrawPile } = takeCards(drawPile, 2, hands, state);
       drawPile = newDrawPile;
       hands    = { ...hands, [tid]: [...(hands[tid] || []), ...drawn] };
       players  = players.map(p => p.id === tid ? { ...p, cardCount: hands[p.id].length } : p);
@@ -3270,7 +3303,7 @@ function applyEffectsAndAdvance(state) {
 
     case 'wild4': {
       const tid = players[nextIdx].id;
-      const { drawn, newDrawPile } = takeCards(drawPile, 4);
+      const { drawn, newDrawPile } = takeCards(drawPile, 4, hands, state);
       drawPile = newDrawPile;
       hands    = { ...hands, [tid]: [...(hands[tid] || []), ...drawn] };
       players  = players.map(p => p.id === tid ? { ...p, cardCount: hands[p.id].length } : p);
@@ -3402,12 +3435,45 @@ async function handlePassTurn() {
 }
 
 // ============================================================
-// TAKE CARDS FROM DRAW PILE (reshuffle fresh deck if empty)
+// TAKE CARDS FROM DRAW PILE (reshuffle the discard pile if it runs out)
 // ============================================================
 
-function takeCards(drawPile, count) {
+// The room doesn't store the discard pile card by card, so it is worked out:
+// the full 112-card deck minus every card that is somewhere else (all hands,
+// the draw pile, cards lying on the table in a challenge, and the top card).
+// `hands` should be the newest hands of the move being made (cards drawn earlier
+// in the same move are already in them); `room` defaults to the current room.
+function rebuildDiscardPile(pile, hands, room) {
+  const key = c => `${c.color}|${c.value}|${c.liar ? 1 : 0}`;
+  const left = new Map();   // card key → copies still unaccounted for
+  for (const c of createDeck()) left.set(key(c), (left.get(key(c)) || 0) + 1);
+  const remove = c => { const k = c && key(c); if (k && left.get(k) > 0) left.set(k, left.get(k) - 1); };
+
+  for (const h of Object.values(hands || {})) (h || []).forEach(remove);
+  pile.forEach(remove);
+  Object.values(room?.wildChallenge?.submittedCards || {}).forEach(remove);
+  if (room?.challengeOpen && room.lastActualCard) remove(room.lastActualCard);
+
+  // The top card stays where it is (a wild shows its chosen colour, so match by value)
+  const out = [];
+  for (const [k, n] of left) {
+    const [color, value, liar] = k.split('|');
+    for (let i = 0; i < n; i++) out.push({ color, value, liar: liar === '1' });
+  }
+  const topIdx = out.findIndex(c => c.value === room?.topValue &&
+    (c.color === room?.topColor || c.color === 'black'));
+  if (topIdx !== -1) out.splice(topIdx, 1);
+  return shuffle(out);
+}
+
+function takeCards(drawPile, count, hands, room) {
   let pile = [...(drawPile || [])];
-  if (pile.length < count) pile = [...pile, ...shuffle(createDeck())];
+  if (pile.length < count) {
+    // Official rule: shuffle the discard pile (minus the top card) into a new draw pile.
+    // If even that is too few, you just draw what there is.
+    room = room || roomState;
+    pile = [...pile, ...rebuildDiscardPile(pile, hands || room?.hands, room)];
+  }
   const drawn = pile.splice(0, count);
   return { drawn, newDrawPile: pile };
 }
@@ -3452,7 +3518,7 @@ async function callUno() {
   let log = state.log;
 
   for (const target of targets) {
-    const { drawn, newDrawPile } = takeCards(drawPile, 2);
+    const { drawn, newDrawPile } = takeCards(drawPile, 2, hands, state);
     drawPile = newDrawPile;
     hands = { ...hands, [target.id]: [...(hands[target.id] || []), ...drawn] };
     players = players.map(p =>
@@ -3488,6 +3554,7 @@ async function backToLobby() {
     status: 'lobby',
     winner: null,
     winnerName: null,
+    winners: null,
     winnerReason: null,
     endVotes: [],
     hands: {},
@@ -3687,14 +3754,14 @@ function renderWinner(state) {
     titleEl.textContent = t('w.last');
     nameEl.textContent  = state.winnerName || '?';
   } else {
-    titleEl.textContent = t('w.winner');
+    titleEl.textContent = t(winnerIds(state).length > 1 ? 'w.shared' : 'w.winner');
     nameEl.textContent  = state.winnerName || '?';
   }
 
   if (reason === 'vote' && state.hands && state.players?.length) {
     const standings = computeStandings(state);
     standingsEl.innerHTML = standings.map((s, i) =>
-      `<div class="standing-row ${s.id === state.winner ? 'winner-row' : ''}">
+      `<div class="standing-row ${winnerIds(state).includes(s.id) ? 'winner-row' : ''}">
         <span class="standing-rank">#${i + 1}</span>
         <span class="standing-name">${esc(s.name)}</span>
         <span class="standing-stats">${t('win.cards', { n: s.cards })} · ${s.points} pts</span>
@@ -4199,7 +4266,7 @@ async function aiExecuteChallenge(state, aiId, aiName) {
     let log = freshState.log;
 
   if (isLie) {
-    const { drawn, newDrawPile } = takeCards(drawPile, 1);
+    const { drawn, newDrawPile } = takeCards(drawPile, 1, hands, freshState);
     hands   = { ...hands, [freshState.lastPlayerId]: [...(hands[freshState.lastPlayerId] || []), actual, ...drawn] };
     players = players.map(p =>
       p.id === freshState.lastPlayerId ? { ...p, cardCount: hands[p.id].length } : p
@@ -4224,7 +4291,7 @@ async function aiExecuteChallenge(state, aiId, aiName) {
   const lastPlayerWon = (hands?.[freshState.lastPlayerId] || []).length === 0;
 
   if (lastPlayerWon) {
-    const { drawn, newDrawPile } = takeCards(drawPile, 1);
+    const { drawn, newDrawPile } = takeCards(drawPile, 1, hands, freshState);
     const newHands   = { ...hands, [aiId]: [...(hands[aiId] || []), ...drawn] };
     const newPlayers = players.map(p =>
       p.id === aiId ? { ...p, cardCount: newHands[p.id].length } : p
@@ -4238,7 +4305,7 @@ async function aiExecuteChallenge(state, aiId, aiName) {
       log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
     });
   } else if (claimed.value === '0') {
-    const { drawn, newDrawPile } = takeCards(drawPile, 1);
+    const { drawn, newDrawPile } = takeCards(drawPile, 1, hands, freshState);
     const advanced = applyEffectsAndAdvance({ ...freshState, hands, players, drawPile: newDrawPile });
     const postHands   = { ...advanced.changes.hands, [aiId]: [...(advanced.changes.hands[aiId] || []), ...drawn] };
     const postPlayers = advanced.changes.players.map(p =>
@@ -4262,7 +4329,7 @@ async function aiExecuteChallenge(state, aiId, aiName) {
       log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
     });
   } else {
-    const { drawn, newDrawPile } = takeCards(drawPile, 1);
+    const { drawn, newDrawPile } = takeCards(drawPile, 1, hands, freshState);
     hands   = { ...hands, [aiId]: [...(hands[aiId] || []), ...drawn] };
     players = players.map(p =>
       p.id === aiId ? { ...p, cardCount: hands[p.id].length } : p
@@ -4341,6 +4408,7 @@ async function aiSubmitWildCard(state, aiPlayer) {
   const hand = [...(state.hands?.[aiId] || [])];
   let cardIdx = hand.findIndex(c => c.color === wc.chosenColor && c.color !== 'black');
   if (cardIdx === -1) cardIdx = hand.findIndex(c => c.color !== 'black');
+  if (cardIdx === -1) cardIdx = hand.length ? 0 : -1;   // only wilds left: bluff with one
   if (cardIdx === -1) return;
 
   const card    = hand[cardIdx];
@@ -4382,7 +4450,7 @@ async function aiAccuseWildPlayer(state, aiPlayer) {
     [targetId]: { card: submitted, result: hasColor ? 'correct' : 'wrong' } };
 
   if (!hasColor) {
-    const { drawn, newDrawPile } = takeCards(drawPile, 1);
+    const { drawn, newDrawPile } = takeCards(drawPile, 1, hands, state);
     drawPile = newDrawPile;
     hands    = { ...hands, [targetId]: [...(hands[targetId] || []), submitted, ...drawn] };
     players  = players.map(p => p.id === targetId ? { ...p, cardCount: hands[p.id].length } : p);
@@ -4439,15 +4507,7 @@ async function aiDiscardWildResolved(state, aiPlayer) {
 async function aiFinalizeWildColor(state, aiPlayer) {
   const wc = state.wildChallenge;
   if (!wc || wc.phase !== 'choosing' || wc.chooserId !== aiPlayer.id) return;
-  const hand  = state.hands?.[aiPlayer.id] || [];
-  const color = aiChooseColor(hand);
-  const log   = addLog(state.log, `${aiPlayer.name} elige el color final: ${COLOR_NAME[color]}.`);
-  await db.collection('rooms').doc(currentRoomId).update({
-    topColor: color, topValue: 'wild',
-    currentPlayerIndex: wc.nextPlayerIndex,
-    wildChallenge: firebase.firestore.FieldValue.delete(),
-    log, lastActivity: firebase.firestore.FieldValue.serverTimestamp()
-  });
+  await db.collection('rooms').doc(currentRoomId).update(wildChallengeEndUpdate(state, wc));
 }
 
 // ---- Seven swap (liar 7 played by AI) ----
@@ -4478,7 +4538,7 @@ async function aiExecuteSevenSwap(state, aiPlayer) {
 
   const penaltyDraw = state.pendingPenaltyDraw;
   if (penaltyDraw) {
-    const { drawn, newDrawPile } = takeCards(drawPile, penaltyDraw.count);
+    const { drawn, newDrawPile } = takeCards(drawPile, penaltyDraw.count, hands, state);
     const pid = penaltyDraw.playerId;
     update.hands   = { ...update.hands, [pid]: [...(update.hands[pid] || []), ...drawn] };
     update.players = update.players.map(p =>
@@ -4525,7 +4585,7 @@ async function aiCatchUno(state, aiCatcher, targetReq) {
     const target = fresh.players.find(p => p.id === targetReq.playerId);
     if (!target || target.cardCount !== 1) return;
 
-    const { drawn, newDrawPile } = takeCards(fresh.drawPile, 2);
+    const { drawn, newDrawPile } = takeCards(fresh.drawPile, 2, fresh.hands, fresh);
     const newHands   = { ...fresh.hands, [targetReq.playerId]: [...(fresh.hands[targetReq.playerId] || []), ...drawn] };
     const newPlayers = fresh.players.map(p =>
       p.id === targetReq.playerId ? { ...p, cardCount: newHands[p.id].length } : p

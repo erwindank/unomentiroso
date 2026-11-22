@@ -248,6 +248,18 @@ body.calm .rc-badge { animation: none; }
 .series-item { padding: .25rem .6rem; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); font-size: .8rem; }
 .series-item b { color: var(--yellow); margin-left: .2rem; font-variant-numeric: tabular-nums; }
 .series-item.lead { border-color: var(--yellow); }
+/* Points race to 500 (official Liar's UNO scoring) */
+.points-gain { font-size: .78rem; color: var(--muted); }
+.points-list { display: flex; flex-direction: column; gap: .3rem; }
+.points-row { display: grid; grid-template-columns: minmax(0, 7rem) 1fr auto; gap: .5rem; align-items: center; font-size: .8rem; }
+.points-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.points-bar { height: 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
+.points-bar i { display: block; height: 100%; background: var(--yellow); border-radius: inherit; }
+.points-row b { color: var(--yellow); font-variant-numeric: tabular-nums; min-width: 2.5rem; text-align: right; }
+.points-row.lead .points-name { font-weight: 700; }
+.match-win { display: flex; flex-direction: column; gap: .15rem; padding: .6rem .8rem; border-radius: 12px; text-align: center;
+  background: linear-gradient(135deg, #2a1f05, #4a3608); border: 1px solid #ffd54a; }
+.match-win span { font-size: .75rem; color: var(--muted); }
 .badge-toast {
   position: fixed; left: 50%; top: max(16px, env(safe-area-inset-top)); transform: translateX(-50%); z-index: 800;
   display: flex; gap: .7rem; align-items: center; padding: .7rem 1.1rem; max-width: calc(100vw - 32px);

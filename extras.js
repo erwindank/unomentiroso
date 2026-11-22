@@ -504,6 +504,10 @@ document.addEventListener('langchange', () => {
 
 addStrings({
   'win.series':   ['Marcador de la sala', 'Room score'],
+  'win.points':   ['Puntos (gana quien llegue a {n})', 'Points (first to {n} wins)'],
+  'win.gain':     ['+{n} puntos por las cartas que quedaron', '+{n} points for the cards left over'],
+  'win.match':    ['🏆 ¡{name} gana la partida completa!', '🏆 {name} wins the match!'],
+  'win.matchSub': ['Llegó a {n} puntos. La próxima partida empieza de cero.', 'Reached {n} points. The next game starts from zero.'],
   'win.awards':   ['Premios de la partida', 'Match awards'],
   'win.newBadge': ['¡Nueva insignia!', 'New badge!'],
   'win.cards':    ['{n} cartas', '{n} cards'],
@@ -579,15 +583,34 @@ function queueStatsWrite(pairs) {
 // Room score: the host adds the win once per game. Each game has a number (gameNo, set
 // when it starts) and the room remembers it was counted (seriesDone), so a second
 // winner-screen redraw or a second device can't count it again.
+// Each winner (several in a shared win) gets +1 win and the round's points
+// (official scoring: all cards left in the other hands). When someone's total
+// reaches 500 the room remembers them as the match winner (matchWinner); the
+// next game then starts the points from zero (handleStart).
+function winnerNames(state) {
+  const names = winnerIds(state).map(id => state.players?.find(p => p.id === id)?.name).filter(Boolean);
+  return names.length ? names : (state.winnerName ? [state.winnerName] : []);
+}
 function saveSeriesOnEnd(state) {
   if (state.hostId !== localUid || !state.winnerName || state.seriesDone) return;
   const gameKey = `${currentRoomId}|${state.gameNo || 0}`;
   if (_seriesSavedFor === gameKey) return;
   _seriesSavedFor = gameKey;
-  db.collection('rooms').doc(currentRoomId)
-    .update(new firebase.firestore.FieldPath('series', state.winnerName), firebase.firestore.FieldValue.increment(1),
-            'seriesDone', true)
-    .catch(() => {});
+  const FP = firebase.firestore.FieldPath, inc = firebase.firestore.FieldValue.increment;
+  const names = winnerNames(state);
+  const gain = roundPoints(state);
+  const args = [];
+  for (const name of names) args.push(new FP('series', name), inc(1));
+  if (gain > 0) {
+    for (const name of names) args.push(new FP('points', name), inc(gain));
+    if (!state.matchWinner) {
+      const totals = names.map(n => [n, (state.points?.[n] || 0) + gain]);
+      const top = Math.max(...totals.map(([, v]) => v));
+      if (top >= MATCH_POINTS) args.push('matchWinner', totals.filter(([, v]) => v === top).map(([n]) => n).join(' & '));
+    }
+  }
+  args.push('seriesDone', true);
+  db.collection('rooms').doc(currentRoomId).update(...args).catch(() => {});
 }
 
 const AWARDS = [
@@ -641,7 +664,7 @@ function recordMyGame(state, gameKey) {
   const s = loadMyStats();
   if (s.recorded.includes(gameKey)) return [];
   s.recorded = [...s.recorded, gameKey].slice(-30);
-  const won = state.winner === localUid;
+  const won = winnerIds(state).includes(localUid);
   const ms = state.stats?.[localUid] || {};
   s.games++;
   if (won) { s.wins++; s.streak++; s.best = Math.max(s.best, s.streak); } else s.streak = 0;
@@ -696,7 +719,7 @@ function afterWinnerRender(state) {
   // Cards left for everyone (the original screen only listed them after a vote)
   if (standings.classList.contains('hidden') && state.hands && state.players?.length) {
     standings.innerHTML = `<div class="standing-head">${t('win.standings')}</div>` + computeStandings(state).map((s, i) =>
-      `<div class="standing-row ${s.id === state.winner ? 'winner-row' : ''}">
+      `<div class="standing-row ${winnerIds(state).includes(s.id) ? 'winner-row' : ''}">
         <span class="standing-rank">#${i + 1}</span>
         <span class="standing-name">${esc(s.name)}</span>
         <span class="standing-stats">${t('win.cards', { n: s.cards })}</span>
@@ -714,16 +737,31 @@ function afterWinnerRender(state) {
   const awards = matchAwards(state);
   const series = Object.entries(state.series || {}).sort((a, b) => b[1] - a[1]);
   const total = series.reduce((n, [, w]) => n + w, 0);
-  extra.innerHTML =
+  // Points race to 500. Before the host has saved this game, add its points in
+  // so everyone sees the new totals straight away.
+  const gain = roundPoints(state);
+  const wNames = winnerNames(state);
+  const pts = { ...(state.points || {}) };
+  if (!state.seriesDone && gain > 0) for (const n of wNames) pts[n] = (pts[n] || 0) + gain;
+  const ptsList = Object.entries(pts).sort((a, b) => b[1] - a[1]);
+  const pointsHTML = ptsList.length ? `<div class="win-sec">
+      ${state.matchWinner ? `<div class="match-win"><b>${t('win.match', { name: esc(state.matchWinner) })}</b><span>${t('win.matchSub', { n: MATCH_POINTS })}</span></div>` : ''}
+      <div class="mode-label">${t('win.points', { n: MATCH_POINTS })}</div>
+      ${gain > 0 ? `<div class="points-gain">${esc(wNames.join(' & '))} · ${t('win.gain', { n: gain })}</div>` : ''}
+      <div class="points-list">${ptsList.map(([name, p]) =>
+        `<div class="points-row ${wNames.includes(name) ? 'lead' : ''}"><span class="points-name">${esc(name)}</span>
+          <span class="points-bar"><i style="width:${Math.min(100, p / MATCH_POINTS * 100)}%"></i></span><b>${p}</b></div>`).join('')}</div>
+    </div>` : '';
+  extra.innerHTML = pointsHTML +
     (awards.length ? `<div class="win-sec"><div class="mode-label">${t('win.awards')}</div><div class="award-list">${awards.map(a =>
       `<div class="award"><span class="award-icon">${a.icon}</span><span class="award-text"><b>${t('aw.' + a.id)}</b><span>${esc(a.name)} · ${t('aw.' + a.id + 'Why', { n: a.n })}</span></span></div>`).join('')}</div></div>` : '') +
     (total >= 2 ? `<div class="win-sec"><div class="mode-label">${t('win.series')}</div><div class="series">${series.map(([name, w]) =>
-      `<span class="series-item ${name === state.winnerName ? 'lead' : ''}">${esc(name)} <b>${w}</b></span>`).join('')}</div></div>` : '');
+      `<span class="series-item ${wNames.includes(name) ? 'lead' : ''}">${esc(name)} <b>${w}</b></span>`).join('')}</div></div>` : '');
 
   const gameKey = `${currentRoomId}|${state.winner}|${(state.log || []).at(-1)}`;
   if (_celebrated === gameKey) return;
   _celebrated = gameKey;
-  const won = state.winner === localUid;
+  const won = winnerIds(state).includes(localUid);
   FX.play(won ? 'win' : 'lose');
   if (won) FX.buzz([60, 40, 60, 40, 160]);
   confetti(won ? 4200 : 2600, won ? 200 : 90);
