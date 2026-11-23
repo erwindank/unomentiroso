@@ -528,3 +528,26 @@ body.bot-game #game-room-code { display: none; }
 @media (max-width: 640px) {
   .player-hand.fitted { padding-bottom: calc(26px + env(safe-area-inset-bottom, 0px)); }
 }
+
+/* ============================================================
+   Game awards on the winner screen: one full-width row each,
+   gold medal icon, title / winner / reason on their own lines,
+   nothing cut off
+   ============================================================ */
+.award-list { grid-template-columns: 1fr; gap: .45rem; }
+.award {
+  gap: .75rem; padding: .6rem .8rem; border-radius: 14px; align-items: center;
+  background: linear-gradient(90deg, rgba(245,192,74,.10), rgba(255,255,255,.03) 60%);
+  border: 1px solid rgba(245,192,74,.25);
+}
+.award-icon {
+  flex: none; width: 44px; height: 44px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 1.45rem;
+  background: radial-gradient(circle at 35% 30%, #ffe08a, #f5c04a 55%, #a87a14);
+  box-shadow: 0 0 0 2px rgba(255,255,255,.25), 0 4px 10px rgba(0,0,0,.4);
+}
+.award-text { gap: 1px; text-align: left; align-items: flex-start; }
+.award-text b { font-family: var(--font-display); font-size: .95rem; letter-spacing: .04em; text-transform: uppercase; color: #f5c04a; }
+.award-text span { white-space: normal; overflow: visible; text-overflow: clip; }
+.award-text .award-who { font-size: .9rem; font-weight: 700; color: #eef2fb; }
+.award-text .award-why { font-size: .8rem; color: #9aa8c4; }

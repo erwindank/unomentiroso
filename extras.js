@@ -759,7 +759,8 @@ function afterWinnerRender(state) {
     </div>` : '';
   extra.innerHTML = pointsHTML +
     (awards.length ? `<div class="win-sec"><div class="mode-label">${t('win.awards')}</div><div class="award-list">${awards.map(a =>
-      `<div class="award"><span class="award-icon">${a.icon}</span><span class="award-text"><b>${t('aw.' + a.id)}</b><span>${esc(a.name)} · ${t('aw.' + a.id + 'Why', { n: a.n })}</span></span></div>`).join('')}</div></div>` : '') +
+      // New look: winner and reason on their own lines so nothing gets cut off
+      `<div class="award"><span class="award-icon">${a.icon}</span><span class="award-text"><b>${t('aw.' + a.id)}</b><span class="award-who">${esc(a.name)}</span><span class="award-why">${t('aw.' + a.id + 'Why', { n: a.n })}</span></span></div>`).join('')}</div></div>` : '') +
     (total >= 2 ? `<div class="win-sec"><div class="mode-label">${t('win.series')}</div><div class="series">${series.map(([name, w]) =>
       `<span class="series-item ${wNames.includes(name) ? 'lead' : ''}">${esc(name)} <b>${w}</b></span>`).join('')}</div></div>` : '');
 
