@@ -265,7 +265,7 @@ addEnglish({
   'rules.scoreT':  'Points',
   'rules.score':   'The winner scores the cards left in everyone else\'s hand: numbers at face value, <strong>⊘ ⇄ +2</strong> 20, wilds 50. First to <strong>500 points</strong> wins the match. If several players run out of cards at once, they share the win.',
   'rules.hereT':   'How to play here',
-  'rules.here':    'On your turn each card has a mark: <strong>✓</strong> you can play it truthfully, <strong>🎭</strong> only by lying, <strong>✕</strong> not at all. Hold a card to see it bigger. Tap another player to throw something at them.',
+  'rules.here':    'On your turn, cards you can play truthfully <strong>glow gold</strong>, cards you can only play by lying get a <strong>Lie</strong> tag, and cards you cannot play are dimmed with a <strong>✕</strong>. Hold a card to see it bigger. Tap another player to throw something at them.',
   'rules.ok':      'Got it'
 });
 

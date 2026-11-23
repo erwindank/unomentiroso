@@ -74,6 +74,7 @@ function seatFaceHTML(state, p) {
 // ============================================================
 
 addStrings({
+  'look.lieTag':     ['Mentira', 'Lie'],
   'turn.yours':      ['¡Tu turno!', 'Your turn!'],
   'turn.yoursSub':   ['Elige una carta o roba', 'Pick a card or draw'],
   'danger.other':    ['¡{name} está a 2 cartas!', '{name} is 2 cards away!'],
@@ -172,7 +173,10 @@ function markHandBadges(state) {
     const b = document.createElement('span');
     b.className = `hand-badge hb-${kind}`;
     b.title = t('badge.' + kind);
-    b.textContent = kind === 'ok' ? '✓' : kind === 'bluff' ? '🎭' : '✕';
+    // New look: honest cards glow gold (badge hidden by look.css), bluff-only cards
+    // get a small "Mentira" tag with the "?" speech bubble, unplayable ones dim with ✕
+    if (kind === 'bluff') b.innerHTML = `${CARD_SVG.bubble}<span>${t('look.lieTag')}</span>`;
+    else b.textContent = kind === 'ok' ? '✓' : '✕';
     el.appendChild(b);
     if (kind === 'no') el.classList.add('cant-play');
   });
@@ -188,8 +192,9 @@ function fitHand() {
   const n = cards.length, w = cards[0].offsetWidth || 60;
   const avail = hand.clientWidth - 8;
   const overlap = n > 1 ? Math.min(w * 0.72, Math.max(0, (n * w - avail) / (n - 1) + 2)) : 0;
-  const fan = n > 1 ? Math.min(2.4, 16 / n) : 0;
-  const k = Math.min(0.9, 40 / (n * n));
+  // New look (LOOK-PLAN step 6): a deeper curve, like holding the cards in your hand
+  const fan = n > 1 ? Math.min(5, 34 / n) : 0;
+  const k = Math.min(1.6, 70 / (n * n));
   hand.style.setProperty('--overlap', overlap + 'px');
   hand.style.setProperty('--fan', fan + 'deg');
   cards.forEach((el, i) => {
@@ -300,7 +305,7 @@ async function handleSetTurnTimer(sec) {
 
 addStrings({
   'claim.truth':   ['✓ Verdad', '✓ Truth'],
-  'claim.lie':     ['🎭 Mentira', '🎭 Lie'],
+  'claim.lie':     ['🤥 Mentira', '🤥 Lie'],
   'claim.invalid': ['✕ No vale sobre esta carta', "✕ Doesn't match the top card"],
   'claim.truthTip':['Si te acusan, el que acusa roba 1.', 'If someone accuses you, they draw 1.'],
   'claim.lieTip':  ['Si te pillan, recuperas la carta y robas 1.', "If you're caught, you take the card back and draw 1."],
@@ -614,7 +619,7 @@ function saveSeriesOnEnd(state) {
 }
 
 const AWARDS = [
-  { id: 'liar',      icon: '🎭', stat: 'gotAway', min: 2 },
+  { id: 'liar',      icon: '🤥', stat: 'gotAway', min: 2 },
   { id: 'detective', icon: '🕵️', stat: 'catches', min: 2 },
   { id: 'pinocho',   icon: '🤥', stat: 'caught',  min: 2 },
   { id: 'paranoid',  icon: '😒', stat: 'wrong',   min: 2 },
@@ -649,7 +654,7 @@ const BADGES = [
   { id: 'comeback',  icon: '🚀', test: c => c.won && c.maxCards >= 12 },
   { id: 'hunter',    icon: '📣', test: c => (c.ms.unoCatches || 0) >= 1 },
   { id: 'streak',    icon: '🔥', test: c => c.s.streak >= 3 },
-  { id: 'bigliar',   icon: '🎭', test: c => c.s.gotAway >= 25 },
+  { id: 'bigliar',   icon: '🤥', test: c => c.s.gotAway >= 25 },
   { id: 'veteran',   icon: '🎖️', test: c => c.s.games >= 10 },
   { id: 'legend',    icon: '👑', test: c => c.s.wins >= 10 }
 ];

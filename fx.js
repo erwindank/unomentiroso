@@ -287,7 +287,7 @@ const FX = (() => {
   const seatRect = pid => seatEl(pid)?.getBoundingClientRect() || null;
   const pileRect = () => document.getElementById('top-card')?.getBoundingClientRect() || null;
   const deckRect = () => document.querySelector('#draw-pile-area .card-back')?.getBoundingClientRect() || null;
-  const backHTML = () => '<div class="card-back fly-back"><span class="back-uno">UNO</span><span class="back-liars">LIARS</span></div>';
+  const backHTML = () => `<div class="card-back fly-back">${CARD_BACK_INNER}</div>`;
 
   // My hand cards, measured just before I play (app.js calls noteHand in selectCard)
   let handRects = {};

@@ -6,7 +6,7 @@
   <title>UNO Mentiroso</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Rubik:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <!-- Install as an app (Y2) -->
   <link rel="manifest" href="manifest.webmanifest">
@@ -18,26 +18,21 @@
   <meta name="apple-mobile-web-app-title" content="UNO Mentiroso">
   <link rel="stylesheet" href="style.css?v=2">
   <link rel="stylesheet" href="extras.css?v=3">
+  <!-- New look (LOOK-PLAN.md): loaded last so it can restyle the game -->
+  <link rel="stylesheet" href="look.css?v=1">
   <script src="https://cdn.jsdelivr.net/npm/emoji-mart@5/dist/browser.js"></script>
 </head>
 <body>
 
-<!-- LANDING -->
+<!-- LANDING (LOOK-PLAN step 9: box style — blue, faint repeated MENTIROSO,
+     chunky UNO with the red MENTIROSO ribbon under it, bots button first) -->
 <div id="screen-landing" class="screen active">
   <div class="landing-card">
     <!-- Y6: language switch -->
     <div class="landing-lang"><span class="lang-switch"><button type="button" class="lang-btn" data-lang="es" onclick="setLanguage('es')">ES</button><button type="button" class="lang-btn" data-lang="en" onclick="setLanguage('en')">EN</button></span></div>
     <h1 class="game-title"><span class="title-uno">UNO</span><span class="title-mentiroso">Mentiroso</span></h1>
+    <p class="land-trust" data-i18n="look.trust">No te fíes de nadie</p>
     <p class="tagline" data-i18n="land.tagline">Juega cartas. Cuenta mentiras. ¡Atrapa al mentiroso!</p>
-    <div class="rules-card">
-      <h2 data-i18n="land.howTitle">Cómo jugar</h2>
-      <p data-i18n="land.how1">Hay dos tipos de cartas: <strong>Normales</strong> (se juegan boca arriba, no se puede mentir) y <strong>Mentirosas</strong> (se juegan boca abajo y debes anunciar qué carta son — puedes mentir). Las cartas mentirosas incluyen acciones y también algunos números.</p>
-      <p data-i18n="land.how2">Si alguien cree que mientes, puede gritar <strong>¡Mentiroso!</strong> antes del siguiente turno. Si mentías: recuperas la carta y robas 1. Si decías la verdad: el desafiante roba 1.</p>
-      <p data-i18n="land.how3">El <strong>7</strong> cambia tu mano con la de otro jugador. El <strong>0</strong> hace que todos pasen su mano en la dirección actual. Cuando te quede una carta, grita <strong>¡UNO!</strong></p>
-      <button type="button" class="link-btn" onclick="openRules()" data-i18n="land.allRules">Ver todas las reglas →</button>
-    </div>
-    <!-- G7: guided first game (tutorial.js fills in the text) -->
-    <button type="button" id="tutorial-link" class="btn tutorial-link" onclick="startTutorial()">🎓 ¿Primera vez? Aprende jugando (2 min)</button>
     <div class="name-emoji-area">
       <div class="name-input-row">
         <button type="button" id="emoji-trigger-btn" class="emoji-trigger" onclick="toggleEmojiPicker(event)" title="Elige un emoji" data-i18n-title="land.emoji"><span class="emoji-face">🙂</span><span class="emoji-clear">×</span></button>
@@ -45,6 +40,8 @@
       </div>
       <div id="emoji-picker-wrap" class="emoji-picker-wrap hidden"></div>
     </div>
+    <!-- G1: one tap into a game against 3 bots -->
+    <button class="btn btn-bots-quick" id="quick-bots-btn" onclick="handleQuickBots()"><span data-i18n="land.bots">Jugar contra bots</span></button>
     <div class="btn-group">
       <button class="btn btn-primary" id="create-btn" onclick="handleCreate()" data-i18n="land.create">Crear sala</button>
       <button class="btn btn-secondary" onclick="showJoin()" data-i18n="land.joinCode">Unirse con código</button>
@@ -54,12 +51,21 @@
         autocomplete="off" oninput="this.value=this.value.toUpperCase()">
       <button class="btn btn-primary" onclick="handleJoin()" data-i18n="land.join">Unirse</button>
     </div>
-    <!-- G1: one tap into a game against 3 bots -->
-    <button class="btn btn-bots-quick" id="quick-bots-btn" onclick="handleQuickBots()">🤖 <span data-i18n="land.bots">Jugar contra bots</span></button>
     <div id="landing-error" class="error hidden"></div>
+    <!-- G7: guided first game (tutorial.js fills in the text) -->
+    <button type="button" id="tutorial-link" class="btn tutorial-link" onclick="startTutorial()">🎓 ¿Primera vez? Aprende jugando (2 min)</button>
+    <details class="rules-card rules-fold">
+      <summary><h2 data-i18n="land.howTitle">Cómo jugar</h2></summary>
+      <p data-i18n="land.how1">Hay dos tipos de cartas: <strong>Normales</strong> (se juegan boca arriba, no se puede mentir) y <strong>Mentirosas</strong> (se juegan boca abajo y debes anunciar qué carta son — puedes mentir). Las cartas mentirosas incluyen acciones y también algunos números.</p>
+      <p data-i18n="land.how2">Si alguien cree que mientes, puede gritar <strong>¡Mentiroso!</strong> antes del siguiente turno. Si mentías: recuperas la carta y robas 1. Si decías la verdad: el desafiante roba 1.</p>
+      <p data-i18n="land.how3">El <strong>7</strong> cambia tu mano con la de otro jugador. El <strong>0</strong> hace que todos pasen su mano en la dirección actual. Cuando te quede una carta, grita <strong>¡UNO!</strong></p>
+      <button type="button" class="link-btn" onclick="openRules()" data-i18n="land.allRules">Ver todas las reglas →</button>
+    </details>
     <p class="muted" style="font-size:.75rem;text-align:center" data-i18n="land.players">Hasta 10 jugadores · No se necesita cuenta</p>
     <!-- G5: my stats and badges -->
     <button type="button" class="link-btn stats-link" onclick="openMyStats()">🏅 <span data-i18n="stats.open">Tus estadísticas e insignias</span><span id="stats-link-count"></span></button>
+    <!-- cards peeking up from the bottom, like on the box (look.js fills them in) -->
+    <div class="land-fan" id="land-fan" aria-hidden="true"></div>
   </div>
 </div>
 
@@ -94,15 +100,15 @@
         <span id="game-room-code-text"></span>
         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       </button>
-      <button class="btn btn-ghost btn-sm" onclick="openRules()" title="Reglas" data-i18n-title="g.rules">📖</button>
-      <button class="btn btn-ghost btn-sm btn-voice" id="voice-toggle-btn" onclick="toggleVoice()" title="Unirse al chat de voz">🎤</button>
-      <button class="btn btn-ghost btn-sm btn-chat" id="chat-toggle-btn" onclick="toggleChat()" title="Chat" data-i18n-title="g.chat">💬<span id="chat-unread" class="chat-unread hidden">0</span></button>
+      <button class="btn btn-ghost btn-sm" onclick="openRules()" title="Reglas" data-i18n-title="g.rules"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5"/><path d="M9 8h6"/></svg></button>
+      <button class="btn btn-ghost btn-sm btn-voice" id="voice-toggle-btn" onclick="toggleVoice()" title="Unirse al chat de voz"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+      <button class="btn btn-ghost btn-sm btn-chat" id="chat-toggle-btn" onclick="toggleChat()" title="Chat" data-i18n-title="g.chat"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg><span id="chat-unread" class="chat-unread hidden">0</span></button>
 
       <!-- Settings menu (idea B6): everything else lives here, nothing was removed.
            Each row is clickable as a whole; the buttons keep their old ids so the
            existing update functions (music, Spotify, Last.fm…) still work. -->
       <div class="menu-wrap">
-        <button class="btn btn-ghost btn-sm btn-menu" id="menu-btn" onclick="toggleGameMenu(event)" title="Ajustes" data-i18n-title="menu.title" aria-haspopup="true" aria-expanded="false">⚙️<span id="menu-dot" class="menu-dot hidden"></span></button>
+        <button class="btn btn-ghost btn-sm btn-menu" id="menu-btn" onclick="toggleGameMenu(event)" title="Ajustes" data-i18n-title="menu.title" aria-haspopup="true" aria-expanded="false"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><span id="menu-dot" class="menu-dot hidden"></span></button>
         <div id="game-menu" class="game-menu hidden" role="menu">
           <div class="menu-section" data-i18n="menu.game">Partida</div>
           <div class="menu-row"><button class="btn btn-ghost btn-sm" id="end-game-btn" onclick="handleEndGameVote()">Terminar</button><span class="menu-label" data-i18n="menu.end">Votar para terminar la partida</span></div>
@@ -130,28 +136,25 @@
           <div class="menu-row"><span class="lang-switch"><button type="button" class="lang-btn" data-lang="es" onclick="setLanguage('es')">ES</button><button type="button" class="lang-btn" data-lang="en" onclick="setLanguage('en')">EN</button></span><span class="menu-label" data-i18n="menu.lang">Idioma</span></div>
         </div>
       </div>
-      <button class="btn btn-danger btn-sm" id="leave-game-btn" onclick="handleLeaveGame()" data-i18n="g.leave">Salir</button>
+      <button class="btn btn-danger btn-sm" id="leave-game-btn" onclick="handleLeaveGame()"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/></svg><span data-i18n="g.leave">Salir</span></button>
     </div>
   </div>
 
-  <!-- Opponents -->
-  <div id="opponents-row" class="opponents-row"></div>
-
-  <!-- Table -->
+  <!-- Table (LOOK-PLAN steps 3–4): navy felt inside a padded leather rail.
+       The opponents sit around the felt's edge (look.js places each seat). -->
   <div class="game-table">
+    <div class="felt-rail"><div class="felt" id="felt">
+    <!-- Opponents -->
+    <div id="opponents-row" class="opponents-row"></div>
     <div class="table-center">
       <div id="direction-indicator" class="direction-indicator"></div>
       <div class="pile-area">
         <div class="pile draw-pile" id="draw-pile-area" onclick="handleDraw()">
-          <div class="card-back"><span class="back-uno">UNO</span><span class="back-liars">LIARS</span></div>
+          <div class="card-back"><span class="cb-face"><span class="cb-word"><b>UNO</b><i>MENTIROSO</i></span></span></div>
           <span class="pile-label" data-i18n="g.drawPile">Robar</span>
         </div>
         <div class="pile discard-pile">
-          <div id="top-card" class="card red">
-            <span class="card-label tl">?</span>
-            <span class="card-label center">?</span>
-            <span class="card-label br">?</span>
-          </div>
+          <div id="top-card" class="card red"></div>
           <span class="pile-label" data-i18n="g.discardPile">Descarte</span>
         </div>
       </div>
@@ -160,6 +163,7 @@
       </div>
       <div id="game-status" class="game-status"></div>
     </div>
+    </div></div><!-- /felt /felt-rail -->
 
     <div id="uno-alert" class="uno-alert hidden"></div>
 
@@ -321,7 +325,7 @@
       <h4 data-i18n="rules.scoreT">Puntos</h4>
       <p data-i18n="rules.score">Quien gana se lleva los puntos de las cartas que quedan en las manos de los demás: números lo que marcan, <strong>⊘ ⇄ +2</strong> 20, comodines 50. Gana la partida completa quien llegue a <strong>500 puntos</strong>. Si varios se quedan sin cartas a la vez, comparten la victoria.</p>
       <h4 data-i18n="rules.hereT">Cómo jugar aquí</h4>
-      <p data-i18n="rules.here">En tu turno, las cartas llevan una marca: <strong>✓</strong> se puede jugar con la verdad, <strong>🎭</strong> solo mintiendo, <strong>✕</strong> no se puede. Mantén pulsada una carta para verla en grande. Toca a otro jugador para lanzarle algo.</p>
+      <p data-i18n="rules.here">En tu turno, las cartas que puedes jugar con la verdad <strong>brillan en dorado</strong>, las que solo puedes jugar mintiendo llevan la etiqueta <strong>Mentira</strong>, y las que no se pueden jugar se ven apagadas con una <strong>✕</strong>. Mantén pulsada una carta para verla en grande. Toca a otro jugador para lanzarle algo.</p>
     </div>
     <div class="spotify-modal-btns">
       <button class="btn btn-primary btn-sm" onclick="closeRules()" data-i18n="rules.ok">Entendido</button>
@@ -360,10 +364,12 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-<script src="i18n.js?v=2"></script>
-<script src="fx.js?v=2"></script>
-<script src="app.js?v=3"></script>
-<script src="extras.js?v=2"></script>
+<script src="i18n.js?v=3"></script>
+<script src="fx.js?v=3"></script>
+<script src="app.js?v=5"></script>
+<script src="extras.js?v=4"></script>
 <script src="tutorial.js?v=1"></script>
+<!-- New look helpers (seat layout around the table, etc.) -->
+<script src="look.js?v=1"></script>
 </body>
 </html>

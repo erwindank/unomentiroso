@@ -70,36 +70,61 @@ function cardLogName(card) {
   return `${COLOR_NAME[card.color]} ${VALUE_LABEL[card.value]}`;
 }
 
+// ============================================================
+// CARD LOOK (LOOK-PLAN step 1)
+// Every card face and back in the game is drawn from these helpers, so the
+// hand, the pile, the claim preview, the zoom, the reveal slots and fx.js all
+// share one look. Styles live in look.css (cream edge, tilted oval, upright
+// numbers; liar cards = colour frame + dark striped face + "?" bubbles).
+// ============================================================
+
+// Small drawn symbols (instead of text glyphs that look different per phone)
+const CARD_SVG = {
+  skip:    '<svg class="cf-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><circle cx="12" cy="12" r="8.5"/><path d="M6 18 18 6"/></svg>',
+  reverse: '<svg class="cf-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9h12l-3-3"/><path d="M19 15H7l3 3"/></svg>',
+  // liar mark: speech bubble with a question mark ("is that true?")
+  bubble:  '<svg class="cf-svg" viewBox="0 0 24 24"><path fill="currentColor" d="M4 3h16a2.5 2.5 0 0 1 2.5 2.5v9A2.5 2.5 0 0 1 20 17h-7.5L7 21.5V17H4a2.5 2.5 0 0 1-2.5-2.5v-9A2.5 2.5 0 0 1 4 3z"/><path d="M9.3 8.2a2.7 2.7 0 1 1 3.9 2.4c-.8.4-1.2.9-1.2 1.7v.3" fill="none" stroke="#16121d" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="15" r="1.25" fill="#16121d"/></svg>'
+};
+
+// Line icons for the game's top bar (LOOK-PLAN step 7): one matching set
+// instead of emoji, which look different on every phone
+const UI_ICON = {
+  rules: '<svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5"/><path d="M9 8h6"/></svg>',
+  mic:   '<svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
+  micOff:'<svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 4.9 2.3"/><path d="M5 11a7 7 0 0 0 11.5 5.4M19 11a7 7 0 0 1-.4 2.3M12 18v3M3 3l18 18"/></svg>',
+  chat:  '<svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg>',
+  gear:  '<svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>',
+  leave: '<svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/></svg>'
+};
+
+// Inside of a card back: "UNO" with the red "MENTIROSO" ribbon under it
+const CARD_BACK_INNER = '<span class="cb-face"><span class="cb-word"><b>UNO</b><i>MENTIROSO</i></span></span>';
+
+// Inside of a card face (goes inside <div class="card colour [liar]">)
+function cardInnerHTML(card) {
+  const v = card.value;
+  const center = v === 'wild' ? ''
+    : (v === 'skip' || v === 'reverse') ? `<span class="card-label center cf-sym">${CARD_SVG[v]}</span>`
+    : `<span class="card-label center">${VALUE_LABEL[v]}</span>`;
+  const marks = isLiarCard(card)
+    ? `<span class="cf-mark tr">${CARD_SVG.bubble}</span><span class="cf-mark bl">${CARD_SVG.bubble}</span>` : '';
+  return `<span class="cf-face"><span class="cf-oval"></span>${cornerLabelHTML(v, 'tl')}${center}${cornerLabelHTML(v, 'br')}${marks}</span>`;
+}
+
 function buildCardHTML(card, extraStyle) {
   if (!card) return '';
-  const lbl = VALUE_LABEL[card.value];
-  const isWild = WILDS.includes(card.value);
-  const centerHTML = isWild ? wildCenterHTML(card.value)
-    : card.value === 'reverse' ? reverseCenterHTML()
-    : `<span class="card-label center">${lbl}</span>`;
-  return `<div class="card ${card.color} ${isLiarCard(card)?'liar':''}"${extraStyle ? ` style="${extraStyle}"` : ''}>
-    ${cornerLabelHTML(card.value,'tl')}${centerHTML}${cornerLabelHTML(card.value,'br')}
-  </div>`;
+  return `<div class="card ${card.color} ${isLiarCard(card)?'liar':''}"${extraStyle ? ` style="${extraStyle}"` : ''}>${cardInnerHTML(card)}</div>`;
 }
 
 function cornerLabelHTML(value, posClass) {
-  const lbl = VALUE_LABEL[value];
+  // wild corners stay empty (the four-colour oval says it all)
+  const lbl = value === 'wild' ? ''
+            : (value === 'skip' || value === 'reverse') ? CARD_SVG[value]
+            : VALUE_LABEL[value];
   const icon = value === '7' ? '<span class="corner-icon">⇄</span>'
              : value === '0' ? '<span class="corner-icon">↺</span>'
              : '';
   return `<span class="card-label ${posClass}">${lbl}${icon}</span>`;
-}
-
-function reverseCenterHTML() {
-  return `<span class="reverse-center"><span class="rev-arrow">↗</span><span class="rev-arrow">↙</span></span>`;
-}
-
-function wildCenterHTML(value) {
-  const label = value === 'wild4' ? '+4' : '';
-  return `<span class="wild-quad">\
-<span class="wq r"></span><span class="wq b"></span>\
-<span class="wq y"></span><span class="wq g"></span>\
-</span>${label ? `<span class="wild-extra-label">${label}</span>` : ''}`;
 }
 
 // ============================================================
@@ -1233,16 +1258,8 @@ async function handleUnoCallBtn() {
 function renderTopCard(state) {
   const el = document.getElementById('top-card');
   el.className = 'card ' + (state.topColor || 'red');
-  const lbl = VALUE_LABEL[state.topValue] || '?';
-  const isWild = WILDS.includes(state.topValue);
-  const isReverse = state.topValue === 'reverse';
-  const tlHTML = cornerLabelHTML(state.topValue, 'tl');
-  const brHTML = cornerLabelHTML(state.topValue, 'br');
-  el.innerHTML = isWild
-    ? `${tlHTML}${wildCenterHTML(state.topValue)}${brHTML}`
-    : isReverse
-    ? `${tlHTML}${reverseCenterHTML()}${brHTML}`
-    : `${tlHTML}<span class="card-label center">${lbl}</span>${brHTML}`;
+  // the pile always shows the card face up (never the liar frame)
+  el.innerHTML = state.topValue ? cardInnerHTML({ color: state.topColor, value: state.topValue, liar: false }) : '';
 }
 
 function renderOpponents(state) {
@@ -1271,7 +1288,7 @@ function renderOpponents(state) {
       <div class="opponent-name">${esc(p.name)}${isDisconnected ? ` <span class="dc-badge">${t('lob.dc')}</span>` : ''}${hasVoice ? ' <span class="voice-mic-icon">🎤</span>' : ''}</div>
       ${reconnecting ? `<span class="rc-badge" data-since="${presenceMissingSince[p.id]}" data-turn="${isCurrent ? 1 : 0}">${t('rc.label')}</span>` : ''}
       <div class="opponent-cards">${miniCards}</div>
-      <div class="opponent-count">${p.cardCount}🃏</div>
+      <div class="opponent-count">${p.cardCount}</div>
     </div>`;
   }).join('');
 }
@@ -1353,19 +1370,10 @@ function renderHand(state) {
       isPlayable = myTurn;
       onclick = myTurn ? `selectCard(${i})` : '';
     }
-    const lbl = VALUE_LABEL[card.value];
-    const isWild = WILDS.includes(card.value);
-    const centerHTML = isWild ? wildCenterHTML(card.value)
-      : card.value === 'reverse' ? reverseCenterHTML()
-      : `<span class="card-label center">${lbl}</span>`;
     return `<div class="card ${card.color} ${isLiarCard(card) ? 'liar' : ''}${isPlayable ? ' playable' : ''}${extraClass}"
       data-index="${i}"
       onclick="${onclick}"
-    >
-      ${cornerLabelHTML(card.value, 'tl')}
-      ${centerHTML}
-      ${cornerLabelHTML(card.value, 'br')}
-    </div>`;
+    >${cardInnerHTML(card)}</div>`;
   }).join('');
 
   if (inDrawMode) {
@@ -2310,16 +2318,7 @@ async function selectCard(index) {
   claimValue = card.value;
 
   const preview = document.getElementById('actual-card-preview');
-  const _lbl = VALUE_LABEL[card.value];
-  const _isWild = WILDS.includes(card.value);
-  const _centerHTML = _isWild ? wildCenterHTML(card.value)
-    : card.value === 'reverse' ? reverseCenterHTML()
-    : `<span class="card-label center" style="font-size:1.2rem">${_lbl}</span>`;
-  preview.innerHTML = `<div class="card ${card.color} ${isLiarCard(card) ? 'liar' : ''}" style="width:50px;height:75px;margin:0 auto">
-    ${cornerLabelHTML(card.value, 'tl')}
-    ${_centerHTML}
-    ${cornerLabelHTML(card.value, 'br')}
-  </div>`;
+  preview.innerHTML = buildCardHTML(card, 'width:56px;height:84px;margin:0 auto');
 
   if (card.value === 'wild') {
     document.getElementById('claim-dialog-title').textContent = t('claim.wildTitle');
@@ -2646,11 +2645,11 @@ function buildWcCardTable(wc, state) {
                   : '✗';
       cardHTML = `<div class="wc-slot-flipped ${cls}">${buildCardHTML(flippedEntry.card)}<div class="wc-flip-badge">${badge}</div></div>`;
     } else if (wc.submittedCards?.[pid]) {
-      cardHTML = `<div class="wc-card-back"><span class="back-uno">UNO</span><span class="back-liars">LIARS</span></div>`;
+      cardHTML = `<div class="wc-card-back">${CARD_BACK_INNER}</div>`;
     } else if (wc.playersNeeded?.includes(pid)) {
       cardHTML = `<div class="wc-slot-empty">?</div>`;
     } else {
-      cardHTML = `<div class="wc-card-back"><span class="back-uno">UNO</span><span class="back-liars">LIARS</span></div>`;
+      cardHTML = `<div class="wc-card-back">${CARD_BACK_INNER}</div>`;
     }
     return `<div class="wc-card-slot">${cardHTML}<span class="wc-slot-name">${esc(p.name)}</span></div>`;
   }).join('');
@@ -2702,14 +2701,8 @@ function renderWildChallenge(state) {
       handEl.classList.remove('hidden');
       handEl.innerHTML = myHand.map((card, i) => {
         const disabled = false;   // every card may go down (wilds count as a lie)
-        const lbl = VALUE_LABEL[card.value];
-        const center = WILDS.includes(card.value) ? wildCenterHTML(card.value)
-          : card.value === 'reverse' ? reverseCenterHTML()
-          : `<span class="card-label center">${lbl}</span>`;
         return `<div class="card ${card.color} ${isLiarCard(card)?'liar':''} ${disabled?'wc-disabled':'playable'}"
-          ${disabled ? '' : `onclick="submitWildCard(${i})"`}>
-          ${cornerLabelHTML(card.value,'tl')}${center}${cornerLabelHTML(card.value,'br')}
-        </div>`;
+          ${disabled ? '' : `onclick="submitWildCard(${i})"`}>${cardInnerHTML(card)}</div>`;
       }).join('');
     } else {
       title.innerHTML = `🃏 ${t('card.wild')} — ${colorSpan(wc.chosenColor)}`;
@@ -4923,14 +4916,14 @@ function updateVoiceButton() {
   if (!btn) return;
   btn.classList.remove('voice-active', 'voice-muted', 'voice-self-speaking');
   if (voiceState === 'off') {
-    btn.textContent = '🎤';
+    btn.innerHTML = UI_ICON.mic;
     btn.title = t('vc.join');
   } else if (voiceState === 'on') {
-    btn.textContent = '🎤';
+    btn.innerHTML = UI_ICON.mic;
     btn.title = t('vc.mute');
     btn.classList.add('voice-active');
   } else {
-    btn.textContent = '🔇';
+    btn.innerHTML = UI_ICON.micOff;
     btn.title = t('vc.leave');
     btn.classList.add('voice-muted');
   }
