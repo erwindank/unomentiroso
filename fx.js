@@ -388,9 +388,14 @@ const FX = (() => {
     }
     // Cards drawn (penalties, draws, +2/+4) — not when hands were swapped around
     if (!swappedHands) {
+      // A caught liar takes their own card back (the 'caught' event already flies it
+      // to their seat), so that card is not part of the penalty draw shown as +N
+      const caughtLiar = ev.find(e => e.type === 'caught')?.liar;
       for (const p of cur.players) {
         const before = prev.players.find(x => x.id === p.id)?.cardCount;
-        if (before != null && p.cardCount > before) ev.push({ type: 'draw', pid: p.id, n: p.cardCount - before });
+        let n = before != null ? p.cardCount - before : 0;
+        if (p.id === caughtLiar) n -= 1;
+        if (n > 0) ev.push({ type: 'draw', pid: p.id, n });
       }
     }
     for (const e of ev) enqueue(() => run(e, cur));
